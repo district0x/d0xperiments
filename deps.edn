@@ -1,0 +1,11 @@
+{:deps {org.clojure/clojure       {:mvn/version "1.9.0"}
+        org.clojure/clojurescript {:mvn/version "1.10.339"}
+        datascript                {:mvn/version "0.16.6"}
+        cljs-web3                 {:mvn/version "0.19.0-0-11"}
+        re-frame                  {:mvn/version "0.10.6"}
+        re-posh                   {:mvn/version "0.3.0"}
+        com.bhauman/figwheel-main {:mvn/version "0.1.9"}}
+ :paths ["src" "resources" "test"]
+ :aliases {:build {:main-opts ["-m" "figwheel.main" "-b" "dev" "-r"]}
+           :min   {:main-opts ["-m" "figwheel.main" "-O" "advanced" "-bo" "dev"]}
+           :test  {:main-opts ["-m" "figwheel.main" "-co" "test.cljs.edn" "-m" d0xperiments.test-runner]}}}
