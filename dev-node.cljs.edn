@@ -1,5 +1,5 @@
 ^{:watch-dirs ["test" "src"]
   :css-dirs ["resources/public/css"]
   :auto-testing true}
-{:main d0xperiments.core
+{:main d0xperiments.preindexer
  :target :nodejs}

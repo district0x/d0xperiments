@@ -1,6 +1,5 @@
 (ns ^:figwheel-hooks d0xperiments.core
-  (:require [goog.dom :as gdom]
-            [cljs-web3.core :as web3]
+  (:require [cljs-web3.core :as web3]
             [cljs-web3.eth :as web3-eth]))
 
 (defn ^:after-load on-reload [])
@@ -35,13 +34,3 @@
                                        (fact-fn ev))))))]
     [(get-filter "uint256,string,string,bool")
      (watch-filter "uint256,string,string,bool")]))
-
-(comment
-  (defonce w3 (cljs.nodejs/require "web3"))
-  (defonce web3 (web3/create-web3 w3 "http://localhost:8549/"))
-
-  (defonce s (make-facts-syncer web3 "0x24c51375f85def94f73c65701d4a2a14010ae0c7"
-                            (fn [d]
-                              (.log js/console "D" (clj->js d)))))
-
-  )
