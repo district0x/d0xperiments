@@ -1,13 +1,47 @@
 (ns ^:figwheel-hooks d0xperiments.core
-  (:require
-   [goog.dom :as gdom]))
+  (:require [goog.dom :as gdom]
+            [cljs-web3.core :as web3]
+            [cljs-web3.eth :as web3-eth]))
 
-(defn get-app-element []
-  (gdom/getElement "app"))
+(defn ^:after-load on-reload [])
 
-;; specify reload hook with ^;after-load metadata
-(defn ^:after-load on-reload []
-  ;; optionally touch your app-state to force rerendering depending on
-  ;; your application
-  ;; (swap! app-state update-in [:__figwheel_counter] inc)
-)
+(def facts-db-abi (-> "[{\"constant\":false,\"inputs\":[{\"name\":\"entity\",\"type\":\"uint256\"},{\"name\":\"attribute\",\"type\":\"string\"},{\"name\":\"val\",\"type\":\"string\"}],\"name\":\"removeString\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"entity\",\"type\":\"uint256\"},{\"name\":\"attribute\",\"type\":\"string\"},{\"name\":\"val\",\"type\":\"string\"}],\"name\":\"transactString\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"name\":\"entity\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"attribute\",\"type\":\"string\"},{\"indexed\":false,\"name\":\"val\",\"type\":\"string\"},{\"indexed\":false,\"name\":\"add\",\"type\":\"bool\"}],\"name\":\"Fact\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"name\":\"entity\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"attribute\",\"type\":\"string\"},{\"indexed\":false,\"name\":\"val\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"add\",\"type\":\"bool\"}],\"name\":\"Fact\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"name\":\"entity\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"attribute\",\"type\":\"string\"},{\"indexed\":false,\"name\":\"val\",\"type\":\"address\"},{\"indexed\":false,\"name\":\"add\",\"type\":\"bool\"}],\"name\":\"Fact\",\"type\":\"event\"}]"
+                      js/JSON.parse))
+
+(defn make-facts-syncer [web3 facts-db-address fact-callback]
+  (let [facts-db-contract (web3-eth/contract-at web3 facts-db-abi facts-db-address)
+        fact-fn (fn [ev]
+                  (let [fact (-> ev .-args)
+                        tx-hash (-> ev .-transactionHash)]
+                    (fact-callback [(.-entity fact)
+                                    (.-attribute fact)
+                                    (.-val fact)
+                                    tx-hash
+                                    (.-add fact)])))
+        get-filter (fn [event-sig]
+                     (-> ((aget (.-Fact facts-db-contract) event-sig)
+                          (clj->js {:fromBlock 0 :toBlock "latest"}))
+                         (.get (fn [err events]
+                                 (if err
+                                   (.error js/console "Got error in facts get " err)
+                                   (doseq [ev events]
+                                     (fact-fn ev)))))))
+        watch-filter (fn [event-sig]
+                       (-> ((aget (.-Fact facts-db-contract) event-sig)
+                            (clj->js {}))
+                           (.watch (fn [err ev]
+                                     (if err
+                                       (.error js/console "Got error in facts watch " err)
+                                       (fact-fn ev))))))]
+    [(get-filter "uint256,string,string,bool")
+     (watch-filter "uint256,string,string,bool")]))
+
+(comment
+  (defonce w3 (cljs.nodejs/require "web3"))
+  (defonce web3 (web3/create-web3 w3 "http://localhost:8549/"))
+
+  (defonce s (make-facts-syncer web3 "0x24c51375f85def94f73c65701d4a2a14010ae0c7"
+                            (fn [d]
+                              (.log js/console "D" (clj->js d)))))
+
+  )
