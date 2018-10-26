@@ -1,0 +1,97 @@
+Idea for a new d0x dapps arch
+
+** Contracts side
+Every dapp contains a contract called FactsDb, which only purpose is to log/emit Datomic like facts [e a v] like :
+
+#+BEGIN_SRC solidity
+event Fact(uint indexed entity, string indexed attribute, string indexed  val, bool add);
+event Fact(uint indexed entity, string indexed attribute, uint indexed    val, bool add);
+event Fact(uint indexed entity, string indexed attribute, address indexed val, bool add);
+// ... more types here
+
+function transactString(uint entity, string attribute, string val)
+external
+onlyAllowed
+{
+   emit Fact(entity, attribute, val, true);
+}
+
+function removeString(uint entity, string attribute, string val)
+external
+onlyAllowed
+{
+   emit Fact(entity, attribute, val, false);
+}
+// ... more fns for more types here
+#+END_SRC
+
+This approach centralizes logs and makes some stuff easier for dapps ui part because :
+
+- All you need to do is add a filter for the FactsDb address and the topics above
+- You can evolve other contracs with more events without the need of upgrading FactsDb contract (no memefactory Registry.sol upgrade problem)
+- Since you can optionally index by e,a or v you can add special filters (subscribe) to any of those
+
+*** Calculating entity ids
+
+- reg-entry -> reg-entry/address
+- tokens    -> keccak256("token/id", 20)
+
+** Indexer and pre built indexes
+
+If we see our FactsDb logs in the blockchain as our immutable, distributed dapp datoms, now we have the problem of indexing them to give a fast user experience.
+I think a natural fit for indexing datoms is Datascript DB.
+
+We can create a generic component (it can run on browser and node), lets call it syncer, with the only purpose of given a eth address and datascript schema, transact all FactsDb datoms inside a Datascript db.
+Since datascript db is serializable we can dump it on local storage in browser or a edn file in server so when we start from scratch we can just re synchronize from last seen block (since blockchain is immutable).
+
+With this syncer component the only thing needed to run the application is browser UI app (no need for server), which is much more decentralized.
+
+Because we can run the syncer on a server for free with a main, we can run a copy on some servers that keep building this indexes so when new user first loads the app it can try to reach a server and retrieve a already indexed Datascript, instead of starting from a empty one, which should make app start much faster.
+
+** UI
+
+We can keep using all our district0x component, but instead of district-ui-graphql we can use something like re-posh, which has the same idea of subscribing with queries
+but against a Datascript db, using datalog and pull instead of graphql.
+
+** Nice properties
+
+- Much closer to a fully decentralized app
+- Can use apps (at least for browsing) offline
+- No need for custom server implementation, syncer can be a generic component
+- Less complex than our current UI architecture (graphql on client/server, data normalization, etc)
+
+** Notes
+
+I'm not sure how well this scale in super big applications, the only problem I see are dapps with so many datoms that :
+- is hard to keep the entire index on client
+- it takes a lot to download index image first time
+
+Non of those looks to me as big problems now since bandwidth and clients are super powerful and keep improving everyday,
+also there are not a lot of dapps users now, so I think is better to be able to deliver a bigger variety of applications faster than to
+try to support super big applications.
+
+I also think it is aligned and also push in the direction of the ultimate district0x goal that is to create a tool for non technical users
+to be able to create districts.
+
+*** Event cost (transfered to users)
+
+#+BEGIN_SRC solidity
+
+event MemeConstructedEvent(address registryEntry, uint version, address creator, bytes metaHash, uint totalSupply, uint deposit, uint challengePeriodEnd);
+//    375 +                32                     32            32               60              32                32            32                         = 627 = $0.001 at 7.1gwei
+
+transactAddress(1, "reg-entry/address", xxxx)               //   375 + 32 + 17 + 32  = 456
+transactUInt(1, "reg-entry/version", xxxx)                  //   375 + 32 + 17 + 32  = 456
+transactAddress(1, "reg-entry/creator", xxxx)               //   375 + 32 + 17 + 32  = 456
+transactString(1, "reg-entry/meta-hash", xxxx)              //   375 + 32 + 19 + 60  = 458
+transactUInt(1, "reg-entry/total-supply", xxxx)             //   375 + 32 + 22 + 32  = 461
+transactUInt(1, "reg-entry/deposit", xxxx)                  //   375 + 32 + 17 + 32  = 456
+transactUInt(1, "reg-entry/challenge-period-end", xxxx)     //   375 + 32 + 20 + 32  = 459
+                                                            //                       = 3202 = $0.005 at 7.1gwei
+#+END_SRC
+
+for constructing a meme it is 0.004 US$ that user is paying extra
+
+** Not in post / things to comment
+
+- Since arch is much simpler it should be easier to attract other developers to collaborate with d0x
