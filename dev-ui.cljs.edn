@@ -1,5 +1,4 @@
-^{:watch-dirs ["test" "src"]
+^{:watch-dirs ["test" "src" "example-src"]
   :css-dirs ["resources/public/css"]
   :auto-testing true}
-{:main d0xperiments.core
- :target :browser}
+{:main d0xperiments.example.core}
