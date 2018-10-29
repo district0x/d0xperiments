@@ -15,11 +15,13 @@
 (defn create-filters [facts-db-address]
   (make-facts-syncer web3 facts-db-address
                      (fn [[e a v t _ :as datom]]
-                       (.log js/console "D" (clj->js datom))
+                       (.log js/console (str "[" :db/add " "(bn/number e) " " (keyword a) " " v "]"))
                        (d/transact! conn [[:db/add
                                            (bn/number e)
                                            (keyword a)
-                                           v]]))))
+                                           (if (bn/bignumber? v)
+                                             (bn/number v)
+                                             v)]]))))
 
 
 
