@@ -1,0 +1,28 @@
+{
+ :reg-entry/address               {}
+ :reg-entry/challenge-period-end  {}
+ :reg-entry/deposit               {}
+ :reg-entry/challenge             {:db/valueType :db.type/ref}
+ :meme/total-supply               {}
+ :meme/title                      {}
+ :meme/image-hash                 {}
+ :meme/total-minted               {}
+ :meme/token-id-start             {}
+ :meme/token-id-end               {}
+ :challenge/reason                {}
+ :challenge/challenger            {:db/valueType :db.type/ref}
+ :challenge/commit-period-end     {}
+ :challenge/reveal-period-end     {}
+ :challenge/vote                  {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
+ :challenge/reward-pool           {}
+ :challenge/reclaimed-reward-on   {}
+ :challenge/reclaimed-amount      {}
+ :vote/amount                     {}
+ :vote/voter                      {:db/valueType :db.type/ref}
+ :vote/option                     {}
+ :vote/revealed-on                {}
+ :vote/reclaimed-amount-on        {}
+ :vote/reclaimed-reward-on        {}
+ :user/created                    {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
+ :user/challenged                 {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
+ }

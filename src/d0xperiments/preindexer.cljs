@@ -11,11 +11,20 @@
 (defonce http (nodejs/require "http"))
 (defonce zlib (nodejs/require "zlib"))
 (defonce Buffer (.-Buffer (nodejs/require "buffer")))
+(defonce fs (nodejs/require "fs"))
+
 (defonce web3 (web3/create-web3 w3 "http://localhost:8549/"))
-(defonce conn (d/create-conn {}))
+#_(defonce conn (d/create-conn (load-schema "/home/jmonetta/my-projects/district0x/d0xperiments/example-src/d0xperiments/example/db_schema.edn")))
 (defonce last-seen-block (atom 0))
 
-(defn create-filters [facts-db-address]
+(defn load-schema [file-path]
+  (or
+   (-> (fs.readFileSync file-path)
+       .toString
+       cljs.reader/read-string)
+   {}))
+
+(defn create-filters [facts-db-address conn]
   (make-facts-syncer web3 facts-db-address
                      (fn [block-num [e a v t _ :as datom]]
                        (.log js/console (str "[" :db/add " "(bn/number e) " " (keyword a) " " v "]"))
@@ -29,25 +38,27 @@
 
 
 
-(defn -main [& [facts-db-address port]]
+(defn -main [& [facts-db-address port schema-file]]
+  (let [schema (load-schema schema-file)
+        conn (d/create-conn schema)]
 
-  (create-filters facts-db-address)
+    (create-filters facts-db-address conn)
 
-  (doto (.createServer http
-                       (fn [req res]
-                         (let [res-map {:db @conn
-                                        :last-seen-block @last-seen-block}
-                               res-content (zlib.gzipSync (Buffer.from (prn-str res-map)))]
-                           (.log js/console "Content got gziped to " (.-length res-content))
-                           (.writeHead res 200 #js {"Content-Type" "application/edn"
-                                                    "Content-Encoding" "gzip"
-                                                    "Access-Control-Allow-Origin" "*"
-                                                    "Access-Control-Request-Method" "*"
-                                                    "Access-Control-Allow-Methods" "OPTIONS, GET"
-                                                    "Access-Control-Allow-Headers" "*"})
-                           (.write res res-content)
-                           (.end res))))
-    (.listen port)))
+    (doto (.createServer http
+                         (fn [req res]
+                           (let [res-map {:db @conn
+                                          :last-seen-block @last-seen-block}
+                                 res-content (zlib.gzipSync (Buffer.from (prn-str res-map)))]
+                             (.log js/console "Content got gziped to " (.-length res-content))
+                             (.writeHead res 200 #js {"Content-Type" "application/edn"
+                                                      "Content-Encoding" "gzip"
+                                                      "Access-Control-Allow-Origin" "*"
+                                                      "Access-Control-Request-Method" "*"
+                                                      "Access-Control-Allow-Methods" "OPTIONS, GET"
+                                                      "Access-Control-Allow-Headers" "*"})
+                             (.write res res-content)
+                             (.end res))))
+      (.listen port))))
 
 
 (set! *main-cli-fn* -main)

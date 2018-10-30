@@ -1,4 +1,4 @@
 ^{:watch-dirs ["test" "src" "example-src"]
   :css-dirs ["resources/public/css"]
   :auto-testing true}
-{:main d0xperiments.example.core}
+{:main d0xperiments.example.dapp}

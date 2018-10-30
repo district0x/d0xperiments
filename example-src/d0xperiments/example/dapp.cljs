@@ -1,4 +1,4 @@
-(ns d0xperiments.example.core
+(ns d0xperiments.example.dapp
   (:require [d0xperiments.core :refer [make-facts-syncer]]
             [datascript.core :as d]
             [bignumber.core :as bn]
@@ -50,15 +50,21 @@
 
 (re-frame/reg-event-fx
  ::bad-http-result
- (fn [_ _]
+ (fn [{:keys [db]} _]
    (.log js/console "We couldn't find a pre indexed db, no worries, syncing from blockchain")
    {::connect-re-posh (d/create-conn)
     ::mount-root nil
-    ::install-filters {:from-block 0}}))
+    ::install-filters {:from-block 0}
+    :db (assoc db :filters-start-time-millis (.getTime (js/Date.)))}))
+
+(def facts-stop-watch-mark 4149)
 
 (re-frame/reg-event-fx
  ::add-fact
  (fn [{:keys [db]} [_ block-num [e a v t x]]]
+   (when (>= (:facts-counter db)  facts-stop-watch-mark)
+     (.log js/console "Synchronized " facts-stop-watch-mark " facts in " (- (.getTime (js/Date.))
+                                                                            (:filters-start-time-millis db))))
    {:transact [[:db/add e a v t]]
     :db (-> db
             (update :facts-counter (fnil inc 0))
@@ -124,9 +130,20 @@
    [:ul {}
     [:li (str "Last seen block: " last-seen-block)]
     [:li (str "Facts count: " facts-counter)]
-    [:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
-    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
-    [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]))
+    #_[:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
+    #_[:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
+    #_[:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
+    #_[:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
+    #_[:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
+    #_[:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
+    #_[:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
+    #_[:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]))
+
+(defn meme-factory-search-item []
+  )
+
+(defn meme-factory-search []
+  )
 
 (defn main []
   [:div
