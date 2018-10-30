@@ -7,7 +7,8 @@
             [re-frame.core :as re-frame]
             [reagent.core :as reagent]
             [day8.re-frame.http-fx]
-            [ajax.core :as ajax]))
+            [ajax.core :as ajax]
+            [clojure.string :as str]))
 
 (def facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05")
 
@@ -62,7 +63,7 @@
 (re-frame/reg-event-fx
  ::add-fact
  (fn [{:keys [db]} [_ block-num [e a v t x]]]
-   (when (>= (:facts-counter db)  facts-stop-watch-mark)
+   #_(when (>= (:facts-counter db)  facts-stop-watch-mark)
      (.log js/console "Synchronized " facts-stop-watch-mark " facts in " (- (.getTime (js/Date.))
                                                                             (:filters-start-time-millis db))))
    {:transact [[:db/add e a v t]]
@@ -79,7 +80,13 @@
  (fn [{:keys [from-block]}]
    (let [filters (make-facts-syncer js/web3js facts-db-address
                                     (fn [block-num [e a v t x]]
-                                      (let [datom [(bn/number e) (keyword a) v t x]]
+                                      (let [datom [(bn/number e)
+                                                   (keyword a)
+                                                   (if (bn/bignumber? v)
+                                                     (bn/number v)
+                                                     v)
+                                                   t
+                                                   x]]
                                         (re-frame/dispatch [::add-fact block-num datom])))
                                     from-block)]
      (.log js/console "Added " filters))))
@@ -120,6 +127,34 @@
    :in $ ?attr
    :where [?eid ?attr]])
 
+(def incl str/includes?)
+
+(re-posh/reg-query-sub
+ ::meme-search
+ '[:find ?eid
+   :in $ ?text ?re
+   :where
+   [?eid :reg-entry/address]
+   [?eid :meme/title ?title]
+   [(re-matches ?re ?title)]
+   #_[(or [?eid :reg-etry/tag ?text])]])
+
+;; Don't know why pull isn't working
+#_(re-posh/reg-sub
+ ::meme-b
+ (fn [_ [_ id]]
+   {:type    :pull
+    :pattern '[:meme/title]
+    :id      id}))
+
+(re-posh/reg-query-sub
+ ::meme
+ '[:find [?t ?rea]
+   :in $ ?eid
+   :where
+   [?eid :reg-entry/address ?rea]
+   [?eid :meme/title ?t]])
+
 
 ;;;;;;;;
 ;; UI ;;
@@ -139,15 +174,29 @@
     #_[:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
     #_[:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]))
 
-(defn meme-factory-search-item []
-  )
+(defn search-item [[rid]]
+  (let [[title address] @(re-frame/subscribe [::meme rid])]
+    [:li (str "Title: " title " @ " address)]))
 
 (defn meme-factory-search []
-  )
+  (let [search-val (reagent/atom "")]
+    (fn []
+      [:div
+       (str @search-val)
+      [:div
+       [:label "Search:"]
+       [:input {:on-change #(reset! search-val (-> % .-target .-value))}]
+       [:button {:on-click (fn [e] (.log js/console e))}
+        "Search"]]
+      [:ul
+       (for [m @(re-frame/subscribe [::meme-search "" (re-pattern (str ".*" @search-val ".*"))])]
+         ^{:key (first m)}
+         [search-item m])]])))
 
 (defn main []
   [:div
-   [hud]])
+   [hud]
+   [meme-factory-search]])
 
  ;;;;;;;;;;
  ;; Init ;;
