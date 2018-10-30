@@ -13,11 +13,13 @@
 (defonce Buffer (.-Buffer (nodejs/require "buffer")))
 (defonce web3 (web3/create-web3 w3 "http://localhost:8549/"))
 (defonce conn (d/create-conn {}))
+(defonce last-seen-block (atom 0))
 
 (defn create-filters [facts-db-address]
   (make-facts-syncer web3 facts-db-address
-                     (fn [[e a v t _ :as datom]]
+                     (fn [block-num [e a v t _ :as datom]]
                        (.log js/console (str "[" :db/add " "(bn/number e) " " (keyword a) " " v "]"))
+                       (swap! last-seen-block (partial (fnil max 0) block-num))
                        (d/transact! conn [[:db/add
                                            (bn/number e)
                                            (keyword a)
@@ -33,15 +35,17 @@
 
   (doto (.createServer http
                        (fn [req res]
-                         (let [content (zlib.gzipSync (Buffer.from (prn-str @conn)))]
-                           (.log js/console "Content got deflated to " (.-length content))
+                         (let [res-map {:db @conn
+                                        :last-seen-block @last-seen-block}
+                               res-content (zlib.gzipSync (Buffer.from (prn-str res-map)))]
+                           (.log js/console "Content got gziped to " (.-length res-content))
                            (.writeHead res 200 #js {"Content-Type" "application/edn"
                                                     "Content-Encoding" "gzip"
                                                     "Access-Control-Allow-Origin" "*"
                                                     "Access-Control-Request-Method" "*"
                                                     "Access-Control-Allow-Methods" "OPTIONS, GET"
                                                     "Access-Control-Allow-Headers" "*"})
-                           (.write res content)
+                           (.write res res-content)
                            (.end res))))
     (.listen port)))
 

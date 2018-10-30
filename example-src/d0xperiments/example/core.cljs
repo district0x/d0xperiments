@@ -36,16 +36,17 @@
 
 (re-frame/reg-event-fx
  ::db-loaded
- (fn [db [_ new-db]]
+ (fn [db [_ raw-res]]
    (.log js/console "HEY, we got a pre indexed db, using that")
-   (let [datascript-db (cljs.reader/read-string new-db)
-         db-conn (d/conn-from-db datascript-db)]
-     ;; This things needs to be in order
+   (let [res-map (cljs.reader/read-string raw-res)
+         db-conn (d/conn-from-db (:db res-map))]
+     ;; This things needs to be in order????
      {::connect-re-posh db-conn
       ::mount-root nil
-      :db (assoc db :facts-counter (count (d/datoms @db-conn :eavt)))
-      ;; ::install-filters {:from-block 0} install from last seen block
-      })))
+      :db (-> db
+              (assoc :facts-counter (count (d/datoms @db-conn :eavt)))
+              (assoc :last-seen-block (:last-seen-block res-map)))
+      ::install-filters {:from-block (:last-seen-block res-map)}})))
 
 (re-frame/reg-event-fx
  ::bad-http-result
@@ -57,9 +58,11 @@
 
 (re-frame/reg-event-fx
  ::add-fact
- (fn [{:keys [db]} [_ e a v t x]]
+ (fn [{:keys [db]} [_ block-num [e a v t x]]]
    {:transact [[:db/add e a v t]]
-    :db (update db :facts-counter (fnil inc 0))}))
+    :db (-> db
+            (update :facts-counter (fnil inc 0))
+            (update :last-seen-block (partial (fnil max 0) block-num)))}))
 
 ;;;;;;;;
 ;; FX ;;
@@ -69,9 +72,10 @@
  ::install-filters
  (fn [{:keys [from-block]}]
    (let [filters (make-facts-syncer js/web3js facts-db-address
-                                    (fn [[e a v t x]]
+                                    (fn [block-num [e a v t x]]
                                       (let [datom [(bn/number e) (keyword a) v t x]]
-                                        (re-frame/dispatch (into [::add-fact] datom)))))]
+                                        (re-frame/dispatch [::add-fact block-num datom])))
+                                    from-block)]
      (.log js/console "Added " filters))))
 
 (re-frame/reg-fx
@@ -93,9 +97,9 @@
 
 
 (re-frame/reg-sub
- ::facts-count
+ ::tracked-stats
  (fn [db _]
-   (:facts-counter db)))
+   (select-keys db [:facts-counter :last-seen-block])))
 
 (re-posh/reg-sub
  ::entities-count
@@ -104,40 +108,37 @@
     :query '[:find (count ?eid)
              :where [?eid]]}))
 
-#_(re-posh/reg-sub
- ::all-people
- (fn [db _]
-   ((d/q '[:find ?e :where [?e :person/name]] @conn)
-    {:type :query
-     :query '[:find [?eid ...]
-              :where [?eid :person/name]]})))
-
-
-#_(re-frame/reg-sub
- ::all-people
- :<- [::all-person-ids]
- (fn [id _]
-  {:type :pull
-   :pattern '[*]
-   :id id}))
-
+(re-posh/reg-query-sub
+ ::attr-count
+ '[:find (count ?eid)
+   :in $ ?attr
+   :where [?eid ?attr]])
 
 
 ;;;;;;;;
 ;; UI ;;
 ;;;;;;;;
 
-(defn facts []
-  [:ul {}
-   [:li (str "Facts count: " @(re-frame/subscribe [::facts-count]))]
-   [:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]])
+(defn hud []
+  (let [{:keys [facts-counter last-seen-block]} @(re-frame/subscribe [::tracked-stats])]
+   [:ul {}
+    [:li (str "Last seen block: " last-seen-block)]
+    [:li (str "Facts count: " facts-counter)]
+    [:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
+    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
+    [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]))
+
+(defn main []
+  [:div
+   [hud]])
 
  ;;;;;;;;;;
  ;; Init ;;
  ;;;;;;;;;;
+
 (defn mount-root []
   (re-frame/clear-subscription-cache!)
-  (reagent/render [facts]
+  (reagent/render [main]
                   (.getElementById js/document "app")))
 
 (.addEventListener js/window "load"
@@ -147,8 +148,11 @@
                        (set! js/web3js (js/Web3. (.-currentProvider js/web3)))
                        (set! js/web3js (web3/create-web3 js/Web3 "http://localhost:8549/")))
 
-                     (.log js/console "Web3js is " js/web3js)
+                     #_(.log js/console "Web3js is " js/web3js)
+
                      (re-frame/dispatch-sync [::initialize])))
+
+
 
 (comment
 
