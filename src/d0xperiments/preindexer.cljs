@@ -9,6 +9,8 @@
 
 (defonce w3 (nodejs/require "web3"))
 (defonce http (nodejs/require "http"))
+(defonce zlib (nodejs/require "zlib"))
+(defonce Buffer (.-Buffer (nodejs/require "buffer")))
 (defonce web3 (web3/create-web3 w3 "http://localhost:8549/"))
 (defonce conn (d/create-conn {}))
 
@@ -31,13 +33,16 @@
 
   (doto (.createServer http
                        (fn [req res]
-                         (.writeHead res 200 #js {"Content-Type" "application/edn"
-                                                  "Access-Control-Allow-Origin" "*"
-                                                  "Access-Control-Request-Method" "*"
-                                                  "Access-Control-Allow-Methods" "OPTIONS, GET"
-                                                  "Access-Control-Allow-Headers" "*"})
-                         (.write res (prn-str @conn))
-                         (.end res)))
+                         (let [content (zlib.gzipSync (Buffer.from (prn-str @conn)))]
+                           (.log js/console "Content got deflated to " (.-length content))
+                           (.writeHead res 200 #js {"Content-Type" "application/edn"
+                                                    "Content-Encoding" "gzip"
+                                                    "Access-Control-Allow-Origin" "*"
+                                                    "Access-Control-Request-Method" "*"
+                                                    "Access-Control-Allow-Methods" "OPTIONS, GET"
+                                                    "Access-Control-Allow-Headers" "*"})
+                           (.write res content)
+                           (.end res))))
     (.listen port)))
 
 
