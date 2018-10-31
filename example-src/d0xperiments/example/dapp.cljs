@@ -3,6 +3,7 @@
             [datascript.core :as d]
             [bignumber.core :as bn]
             [cljs-web3.core :as web3]
+            [cljs-web3.eth :as web3-eth]
             [re-posh.core :as re-posh]
             [re-frame.core :as re-frame]
             [reagent.core :as reagent]
@@ -12,7 +13,7 @@
 
 (def facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05")
 
-(defonce conn (d/create-conn))
+(defonce db-conn (atom nil))
 
 ;;;;;;;;;;;;
 ;; Events ;;
@@ -20,29 +21,32 @@
 
 (re-frame/reg-event-fx
  ::initialize
- (fn [_ _]
-   {:db {}
-    :dispatch [::reload-db]}))
+ (fn [_ [_ last-block-num]]
+   {:db {:sync-progress {"uint256,string,string,bool" 0
+                         "uint256,string,address,bool" 0
+                         "uint256,string,uint256,bool" 0}
+         :filters-start-time-millis (.getTime (js/Date.))}
+    :dispatch [::reload-db last-block-num]}))
 
 (re-frame/reg-event-fx
  ::reload-db
- (fn [cofxs _]
+ (fn [cofxs [_ last-block-num]]
    (.log js/console "Trying to fetch a pre indexed db")
    {:http-xhrio {:method          :get
                  :uri             "http://localhost:1234"
                  :timeout         30000
                  :response-format (ajax/raw-response-format)
                  :on-success      [::db-loaded]
-                 :on-failure      [::bad-http-result]}}))
+                 :on-failure      [::browser-full-sync last-block-num]}}))
 
 (re-frame/reg-event-fx
  ::db-loaded
- (fn [db [_ raw-res]]
+ (fn [{:keys [db]} [_ raw-res]]
    (.log js/console "HEY, we got a pre indexed db, using that")
    (let [res-map (cljs.reader/read-string raw-res)
          db-conn (d/conn-from-db (:db res-map))]
      ;; This things needs to be in order????
-     {::connect-re-posh db-conn
+     {::install-db db-conn
       ::mount-root nil
       :db (-> db
               (assoc :facts-counter (count (d/datoms @db-conn :eavt)))
@@ -50,36 +54,66 @@
       ::install-filters {:from-block (:last-seen-block res-map)}})))
 
 (re-frame/reg-event-fx
- ::bad-http-result
- (fn [{:keys [db]} _]
-   (.log js/console "We couldn't find a pre indexed db, no worries, syncing from blockchain")
-   {::connect-re-posh (d/create-conn)
+ ::browser-full-sync
+ (fn [{:keys [db]} [_ last-block-num]]
+   (.log js/console "We couldn't find a pre indexed db, no worries, syncing from blockchain from 0 to " last-block-num)
+   {::install-db (d/create-conn)
     ::mount-root nil
     ::install-filters {:from-block 0}
-    :db (assoc db :filters-start-time-millis (.getTime (js/Date.)))}))
+    :db (-> db
+            (assoc :init-sync-block 0
+                   :dest-sync-block last-block-num))}))
 
-(def facts-stop-watch-mark 4149)
+(def facts-stop-watch-mark 59640)
 
 (re-frame/reg-event-fx
  ::add-fact
- (fn [{:keys [db]} [_ block-num [e a v t x]]]
-   #_(when (>= (:facts-counter db)  facts-stop-watch-mark)
+ (fn [{:keys [db]} [_ [e a v t x :as fact] {:keys [block-num event-sig]}]]
+   (when (= (:facts-counter db)  facts-stop-watch-mark)
      (.log js/console "Synchronized " facts-stop-watch-mark " facts in " (- (.getTime (js/Date.))
-                                                                            (:filters-start-time-millis db))))
+                                                                            (:filters-start-time-millis db))
+           "millis"))
+   (when (and (:dest-sync-block db) (mod (:facts-counter db) 2000))
+     (.log js/console block-num " from " event-sig (quot (* 100 (- block-num (:init-sync-block db)))
+                                                         (- (:dest-sync-block db) (:init-sync-block db)))
+           "%"))
+
    {:transact [[:db/add e a v t]]
     :db (-> db
+            (assoc-in [:sync-progress event-sig] (quot (* 100 (- block-num (:init-sync-block db)))
+                                                       (- (:dest-sync-block db) (:init-sync-block db))))
             (update :facts-counter (fnil inc 0))
             (update :last-seen-block (partial (fnil max 0) block-num)))}))
 
-;;;;;;;;
-;; FX ;;
-;;;;;;;;
+;; Search by title matching a regular expression
+;; sort-by title
+;; return only first page
+(re-frame/reg-event-fx
+ ::search-memes
+ [(re-frame/inject-cofx ::datascript-db)]
+ (fn [{:keys [db ::datascript-db] :as cfx} [_ text]]
+   (let [q-result (d/q '[:find ?eid ?title
+                         :in $ ?text ?re
+                         :where
+                         [?eid :reg-entry/address]
+                         [?eid :meme/title ?title]
+                         [(re-matches ?re ?title)]]
+                       datascript-db
+                       text (re-pattern (str ".*" text ".*")))]
+     {:db (assoc db :meme-search-results (->> q-result
+                                              (sort-by second)
+                                              (map first)
+                                              (take 20)))})))
+
+;;;;;;;;;;;;;;;;;;;
+;; FXs and COFXs ;;
+;;;;;;;;;;;;;;;;;;;
 
 (re-frame/reg-fx
  ::install-filters
  (fn [{:keys [from-block]}]
    (let [filters (make-facts-syncer js/web3js facts-db-address
-                                    (fn [block-num [e a v t x]]
+                                    (fn [[e a v t x] fact-info]
                                       (let [datom [(bn/number e)
                                                    (keyword a)
                                                    (if (bn/bignumber? v)
@@ -87,13 +121,14 @@
                                                      v)
                                                    t
                                                    x]]
-                                        (re-frame/dispatch [::add-fact block-num datom])))
+                                        (re-frame/dispatch [::add-fact datom fact-info])))
                                     from-block)]
      (.log js/console "Added " filters))))
 
 (re-frame/reg-fx
- ::connect-re-posh
+ ::install-db
  (fn [conn]
+   (reset! db-conn conn)
    (re-posh/connect! conn)))
 
 (declare mount-root)
@@ -103,11 +138,23 @@
  (fn [conn]
    (mount-root)))
 
+(re-frame/reg-cofx
+ ::datascript-db
+ (fn [cofxs]
+   (assoc cofxs ::datascript-db @@db-conn)))
+
 
 ;;;;;;;;;;;;;;;;;;;;
 ;; Subscriptions  ;;
 ;;;;;;;;;;;;;;;;;;;;
 
+
+(re-frame/reg-sub
+ ::installing?
+ (fn [db _]
+   (->> (vals (:sync-progress db))
+        (apply min)
+        (> 99))))
 
 (re-frame/reg-sub
  ::tracked-stats
@@ -127,9 +174,7 @@
    :in $ ?attr
    :where [?eid ?attr]])
 
-(def incl str/includes?)
-
-(re-posh/reg-query-sub
+#_(re-posh/reg-query-sub
  ::meme-search
  '[:find ?eid
    :in $ ?text ?re
@@ -138,6 +183,11 @@
    [?eid :meme/title ?title]
    [(re-matches ?re ?title)]
    #_[(or [?eid :reg-etry/tag ?text])]])
+
+(re-frame/reg-sub
+ ::meme-search-results
+ (fn [db [_]]
+   (:meme-search-results db)))
 
 ;; Don't know why pull isn't working
 #_(re-posh/reg-sub
@@ -165,38 +215,41 @@
    [:ul {}
     [:li (str "Last seen block: " last-seen-block)]
     [:li (str "Facts count: " facts-counter)]
-    #_[:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
-    #_[:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
-    #_[:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
-    #_[:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
-    #_[:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
-    #_[:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
-    #_[:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
-    #_[:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]))
+    [:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
+    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
+    [:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
+    [:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
+    [:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
+    [:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
+    [:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
+    [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]))
 
-(defn search-item [[rid]]
-  (let [[title address] @(re-frame/subscribe [::meme rid])]
+(defn search-item [id]
+  (let [[title address] @(re-frame/subscribe [::meme id])]
     [:li (str "Title: " title " @ " address)]))
 
 (defn meme-factory-search []
-  (let [search-val (reagent/atom "")]
+  (let [search-val (reagent/atom "")
+        result (re-frame/subscribe [::meme-search-results])]
     (fn []
       [:div
-       (str @search-val)
-      [:div
-       [:label "Search:"]
-       [:input {:on-change #(reset! search-val (-> % .-target .-value))}]
-       [:button {:on-click (fn [e] (.log js/console e))}
-        "Search"]]
-      [:ul
-       (for [m @(re-frame/subscribe [::meme-search "" (re-pattern (str ".*" @search-val ".*"))])]
-         ^{:key (first m)}
-         [search-item m])]])))
+       [:div
+        [:label "Search:"]
+        [:input {:on-change #(reset! search-val (-> % .-target .-value))}]
+        [:button {:on-click (fn [e] (re-frame/dispatch [::search-memes @search-val]))}
+         "Search"]]
+       [:ul
+        (for [m @result]
+          ^{:key m}
+          [search-item m])]])))
 
 (defn main []
-  [:div
-   [hud]
-   [meme-factory-search]])
+  (let [installing? @(re-frame/subscribe [::installing?])]
+    (if installing?
+      [:div "Installing dApp, please wait, check the console for progress ... "]
+      [:div
+       [hud]
+       [meme-factory-search]])))
 
  ;;;;;;;;;;
  ;; Init ;;
@@ -214,9 +267,10 @@
                        (set! js/web3js (js/Web3. (.-currentProvider js/web3)))
                        (set! js/web3js (web3/create-web3 js/Web3 "http://localhost:8549/")))
 
-                     #_(.log js/console "Web3js is " js/web3js)
-
-                     (re-frame/dispatch-sync [::initialize])))
+                     #_ (.log js/console "Web3js is " js/web3js)
+                     (web3-eth/block-number js/web3js (fn [err last-block-num]
+                                                        (.log js/console "Last block number is " last-block-num)
+                                                        (re-frame/dispatch-sync [::initialize last-block-num])))))
 
 
 

@@ -26,7 +26,7 @@
 
 (defn create-filters [facts-db-address conn]
   (make-facts-syncer web3 facts-db-address
-                     (fn [block-num [e a v t _ :as datom]]
+                     (fn [[e a v t _ :as datom] {:keys [block-num]}]
                        (.log js/console (str "[" :db/add " "(bn/number e) " " (keyword a) " " v "]"))
                        (swap! last-seen-block (partial (fnil max 0) block-num))
                        (d/transact! conn [[:db/add
