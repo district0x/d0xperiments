@@ -2,16 +2,18 @@
   (:require [d0xperiments.core :refer [make-facts-syncer]]
             [datascript.core :as d]
             [bignumber.core :as bn]
-            [cljs-web3.core :as web3]
-            [cljs-web3.eth :as web3-eth]
             [re-posh.core :as re-posh]
             [re-frame.core :as re-frame]
             [reagent.core :as reagent]
             [day8.re-frame.http-fx]
             [ajax.core :as ajax]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [goog.string :as gstring]))
 
+;; TODO Add chema here!!!
 (def facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05")
+(def preindexer-url "http://localhost:1234")
+(def default-provider-url "ws://localhost:8549/")
 
 (defonce db-conn (atom nil))
 
@@ -22,9 +24,7 @@
 (re-frame/reg-event-fx
  ::initialize
  (fn [_ [_ last-block-num]]
-   {:db {:sync-progress {"uint256,string,string,bool" 0
-                         "uint256,string,address,bool" 0
-                         "uint256,string,uint256,bool" 0}
+   {:db {:sync-progress 0
          :filters-start-time-millis (.getTime (js/Date.))}
     :dispatch [::reload-db last-block-num]}))
 
@@ -33,7 +33,7 @@
  (fn [cofxs [_ last-block-num]]
    (.log js/console "Trying to fetch a pre indexed db")
    {:http-xhrio {:method          :get
-                 :uri             "http://localhost:1234"
+                 :uri             preindexer-url
                  :timeout         30000
                  :response-format (ajax/raw-response-format)
                  :on-success      [::db-loaded]
@@ -50,7 +50,8 @@
       ::mount-root nil
       :db (-> db
               (assoc :facts-counter (count (d/datoms @db-conn :eavt)))
-              (assoc :last-seen-block (:last-seen-block res-map)))
+              (assoc :last-seen-block (:last-seen-block res-map))
+              (assoc :sync-progress 100))
       ::install-filters {:from-block (:last-seen-block res-map)}})))
 
 (re-frame/reg-event-fx
@@ -73,15 +74,11 @@
      (.log js/console "Synchronized " facts-stop-watch-mark " facts in " (- (.getTime (js/Date.))
                                                                             (:filters-start-time-millis db))
            "millis"))
-   (when (and (:dest-sync-block db) (mod (:facts-counter db) 2000))
-     (.log js/console block-num " from " event-sig (quot (* 100 (- block-num (:init-sync-block db)))
-                                                         (- (:dest-sync-block db) (:init-sync-block db)))
-           "%"))
 
    {:transact [[:db/add e a v t]]
     :db (-> db
-            (assoc-in [:sync-progress event-sig] (quot (* 100 (- block-num (:init-sync-block db)))
-                                                       (- (:dest-sync-block db) (:init-sync-block db))))
+            (assoc :sync-progress (quot (* 100 (- block-num (:init-sync-block db)))
+                                        (- (:dest-sync-block db) (:init-sync-block db))))
             (update :facts-counter (fnil inc 0))
             (update :last-seen-block (partial (fnil max 0) block-num)))}))
 
@@ -121,7 +118,8 @@
                                                      v)
                                                    t
                                                    x]]
-                                        (re-frame/dispatch [::add-fact datom fact-info])))
+                                        ;; so we give some space for the render to run and we can show progress
+                                        (js/setTimeout (fn [] (re-frame/dispatch [::add-fact datom fact-info])) 0)))
                                     from-block)]
      (.log js/console "Added " filters))))
 
@@ -148,13 +146,11 @@
 ;; Subscriptions  ;;
 ;;;;;;;;;;;;;;;;;;;;
 
-
 (re-frame/reg-sub
- ::installing?
+ ::sync-progress
  (fn [db _]
-   (->> (vals (:sync-progress db))
-        (apply min)
-        (> 99))))
+   (:sync-progress db)))
+
 
 (re-frame/reg-sub
  ::tracked-stats
@@ -215,14 +211,15 @@
    [:ul {}
     [:li (str "Last seen block: " last-seen-block)]
     [:li (str "Facts count: " facts-counter)]
-    [:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
-    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
-    [:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
-    [:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
-    [:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
-    [:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
-    [:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
-    [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]))
+    [:li [:ul
+          [:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
+          [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
+          [:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
+          [:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
+          [:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
+          [:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
+          [:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
+          [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]]]))
 
 (defn search-item [id]
   (let [[title address] @(re-frame/subscribe [::meme id])]
@@ -244,12 +241,14 @@
           [search-item m])]])))
 
 (defn main []
-  (let [installing? @(re-frame/subscribe [::installing?])]
-    (if installing?
-      [:div "Installing dApp, please wait, check the console for progress ... "]
-      [:div
-       [hud]
-       [meme-factory-search]])))
+  (let [sp @(re-frame/subscribe [::sync-progress])]
+    [:div
+     (cond
+       (zero? sp)   [:div "Downloading app data, please wait..."]
+       (< 0 sp 100) [:div (gstring/format "Installing app (%d%%)" sp)]
+       :else        [:div
+                     [hud]
+                     [meme-factory-search]])]))
 
  ;;;;;;;;;;
  ;; Init ;;
@@ -262,21 +261,22 @@
 
 (.addEventListener js/window "load"
                    (fn []
-                     ;; as shown in https://github.com/MetaMask/faq/blob/master/DEVELOPERS.md#partly_sunny-web3---ethereum-browser-environment-check
-                     (if js/web3
-                       (set! js/web3js (js/Web3. (.-currentProvider js/web3)))
-                       (set! js/web3js (web3/create-web3 js/Web3 "http://localhost:8549/")))
 
-                     #_ (.log js/console "Web3js is " js/web3js)
-                     (web3-eth/block-number js/web3js (fn [err last-block-num]
-                                                        (.log js/console "Last block number is " last-block-num)
-                                                        (re-frame/dispatch-sync [::initialize last-block-num])))))
+                     (.log js/console "Provider " (.-givenProvider js/web3))
+                     (set! js/web3js (js/Web3. (or (.-givenProvider js/web3)
+                                                   default-provider-url)))
+
+                     (.log js/console "Web3js is " js/web3js)
+                     (.log js/console "FactsContract is " )
+
+                     (.getBlockNumber js/web3.eth (fn [err last-block-num]
+                                                    (.log js/console "Last block number is " last-block-num)
+                                                    (re-frame/dispatch-sync [::initialize last-block-num])))))
 
 
 
 (comment
 
-  @(re-frame/subscribe [::all-person-ids])
-  @(re-frame/subscribe [::all-people])
+
 
   )

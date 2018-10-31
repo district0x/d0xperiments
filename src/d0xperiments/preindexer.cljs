@@ -2,8 +2,7 @@
   (:require [datascript.core :as d]
             [bignumber.core :as bn]
             [cljs.nodejs :as nodejs]
-            [d0xperiments.core :refer [make-facts-syncer]]
-            [cljs-web3.core :as web3]))
+            [d0xperiments.core :refer [make-facts-syncer]]))
 
 (nodejs/enable-util-print!)
 
@@ -13,8 +12,9 @@
 (defonce Buffer (.-Buffer (nodejs/require "buffer")))
 (defonce fs (nodejs/require "fs"))
 
-(defonce web3 (web3/create-web3 w3 "http://localhost:8549/"))
-#_(defonce conn (d/create-conn (load-schema "/home/jmonetta/my-projects/district0x/d0xperiments/example-src/d0xperiments/example/db_schema.edn")))
+(defonce web3 (atom nil))
+(defonce conn (atom nil))
+
 (defonce last-seen-block (atom 0))
 
 (defn load-schema [file-path]
@@ -24,8 +24,8 @@
        cljs.reader/read-string)
    {}))
 
-(defn create-filters [facts-db-address conn]
-  (make-facts-syncer web3 facts-db-address
+(defn create-filters [web3-obj facts-db-address conn]
+  (make-facts-syncer web3-obj facts-db-address
                      (fn [[e a v t _ :as datom] {:keys [block-num]}]
                        (.log js/console (str "[" :db/add " "(bn/number e) " " (keyword a) " " v "]"))
                        (swap! last-seen-block (partial (fnil max 0) block-num))
@@ -34,19 +34,29 @@
                                            (keyword a)
                                            (if (bn/bignumber? v)
                                              (bn/number v)
-                                             v)]]))))
+                                             v)]]))
+                     0))
 
 
+;; TODO add tools.cli
 
-(defn -main [& [facts-db-address port schema-file]]
+(defn -main [facts-db-address port schema-file default-provider-url]
   (let [schema (load-schema schema-file)
-        conn (d/create-conn schema)]
+        conn-obj (d/create-conn schema)
+        ws-provider (new (-> w3 .-providers .-WebsocketProvider) default-provider-url #js {:timeout 120000000})
+        web3-obj (new w3 ws-provider)]
 
-    (create-filters facts-db-address conn)
+    (.log js/console ws-provider)
+    (.log js/console web3-obj)
+
+    (reset! web3 web3-obj) ;; for repl
+    (reset! conn conn-obj)
+
+    (create-filters web3-obj facts-db-address conn-obj)
 
     (doto (.createServer http
                          (fn [req res]
-                           (let [res-map {:db @conn
+                           (let [res-map {:db @conn-obj
                                           :last-seen-block @last-seen-block}
                                  res-content (zlib.gzipSync (Buffer.from (prn-str res-map)))]
                              (.log js/console "Content got gziped to " (.-length res-content))
@@ -64,6 +74,11 @@
 (set! *main-cli-fn* -main)
 
 (comment
+
+  (-main "0x360b6d00457775267aa3e3ef695583c675318c05"
+         1234
+         "/home/jmonetta/my-projects/district0x/d0xperiments/example-src/d0xperiments/example/db_schema.edn"
+         "ws://localhost:8549/")
 
   (.listen http-server 1234)
 
