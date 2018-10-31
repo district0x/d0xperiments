@@ -1,10 +1,10 @@
 (ns ^:figwheel-hooks d0xperiments.core
   (:require [cljs-web3.core :as web3]
-            [cljs-web3.eth :as web3-eth]))
+            [cljs-web3.eth :as web3-eth])
+  (:require-macros [d0xperiments.core :refer [facts-abi-string]]))
 
-(defn ^:after-load on-reload [])
 
-(def facts-db-abi (-> "[{\"constant\":false,\"inputs\":[{\"name\":\"entity\",\"type\":\"uint256\"},{\"name\":\"attribute\",\"type\":\"string\"},{\"name\":\"val\",\"type\":\"uint256\"}],\"name\":\"transactUInt\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"entity\",\"type\":\"uint256\"},{\"name\":\"attribute\",\"type\":\"string\"},{\"name\":\"val\",\"type\":\"string\"}],\"name\":\"removeString\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"entity\",\"type\":\"uint256\"},{\"name\":\"attribute\",\"type\":\"string\"},{\"name\":\"val\",\"type\":\"bytes\"}],\"name\":\"transactBytes\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"entity\",\"type\":\"uint256\"},{\"name\":\"attribute\",\"type\":\"string\"},{\"name\":\"val\",\"type\":\"string\"}],\"name\":\"transactString\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"entity\",\"type\":\"uint256\"},{\"name\":\"attribute\",\"type\":\"string\"},{\"name\":\"val\",\"type\":\"address\"}],\"name\":\"transactAddress\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"name\":\"entity\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"attribute\",\"type\":\"string\"},{\"indexed\":false,\"name\":\"val\",\"type\":\"string\"},{\"indexed\":false,\"name\":\"add\",\"type\":\"bool\"}],\"name\":\"Fact\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"name\":\"entity\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"attribute\",\"type\":\"string\"},{\"indexed\":false,\"name\":\"val\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"add\",\"type\":\"bool\"}],\"name\":\"Fact\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"name\":\"entity\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"attribute\",\"type\":\"string\"},{\"indexed\":false,\"name\":\"val\",\"type\":\"address\"},{\"indexed\":false,\"name\":\"add\",\"type\":\"bool\"}],\"name\":\"Fact\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"name\":\"entity\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"attribute\",\"type\":\"string\"},{\"indexed\":false,\"name\":\"val\",\"type\":\"bytes\"},{\"indexed\":false,\"name\":\"add\",\"type\":\"bool\"}],\"name\":\"Fact\",\"type\":\"event\"}] "
+(def facts-db-abi (-> (facts-abi-string "./contracts/build/FactsDb.abi")
                       js/JSON.parse))
 
 (defn make-facts-syncer
@@ -44,4 +44,10 @@
       (watch-filter "uint256,string,address,bool")
 
       (get-filter "uint256,string,uint256,bool")
-      (watch-filter "uint256,string,uint256,bool")])))
+      (watch-filter "uint256,string,uint256,bool")
+
+      (get-filter "uint256,string,bytes,bool")
+      (watch-filter "uint256,string,bytes,bool")
+
+      (get-filter "uint256,string,bytes32,bool")
+      (watch-filter "uint256,string,bytes32,bool")])))
