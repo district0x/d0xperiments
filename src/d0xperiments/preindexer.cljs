@@ -2,7 +2,7 @@
   (:require [datascript.core :as d]
             [bignumber.core :as bn]
             [cljs.nodejs :as nodejs]
-            [d0xperiments.core :refer [make-facts-syncer]]))
+            [d0xperiments.core :refer [install-facts-filter get-past-events]]))
 
 (nodejs/enable-util-print!)
 
@@ -24,18 +24,13 @@
        cljs.reader/read-string)
    {}))
 
-(defn create-filters [web3-obj facts-db-address conn]
-  (make-facts-syncer web3-obj facts-db-address
-                     (fn [[e a v t _ :as datom] {:keys [block-num]}]
-                       (.log js/console (str "[" :db/add " "(bn/number e) " " (keyword a) " " v "]"))
-                       (swap! last-seen-block (partial (fnil max 0) block-num))
-                       (d/transact! conn [[:db/add
-                                           (bn/number e)
-                                           (keyword a)
-                                           (if (bn/bignumber? v)
-                                             (bn/number v)
-                                             v)]]))
-                     0))
+(defn transact-fact [conn {:keys [entity attribute value block-num] :as fact}]
+  (.log js/console (str "[" :db/add " " entity " " attribute " " value "]"))
+  (swap! last-seen-block (partial (fnil max 0) block-num))
+  (d/transact! conn [[:db/add
+                      entity
+                      attribute
+                      value]]))
 
 
 ;; TODO add tools.cli
@@ -43,16 +38,16 @@
 (defn -main [facts-db-address port schema-file default-provider-url]
   (let [schema (load-schema schema-file)
         conn-obj (d/create-conn schema)
-        ws-provider (new (-> w3 .-providers .-WebsocketProvider) default-provider-url #js {:timeout 120000000})
-        web3-obj (new w3 ws-provider)]
+        ws-provider (new (-> w3 .-providers .-WebsocketProvider) (str "ws://" default-provider-url))
+        http-provider (new (-> w3 .-providers .-HttpProvider) (str "http://" default-provider-url))
+        web3-http  (new w3 http-provider)
+        web3-ws (new w3 ws-provider)]
 
-    (.log js/console ws-provider)
-    (.log js/console web3-obj)
+    ;; (reset! web3 web3-obj) ;; for repl
+    ;; (reset! conn conn-obj)
 
-    (reset! web3 web3-obj) ;; for repl
-    (reset! conn conn-obj)
-
-    (create-filters web3-obj facts-db-address conn-obj)
+    (get-past-events web3-http facts-db-address 0 (partial transact-fact conn-obj))
+    (install-facts-filter web3-ws facts-db-address nil (partial transact-fact conn-obj))
 
     (doto (.createServer http
                          (fn [req res]
