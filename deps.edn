@@ -1,11 +1,12 @@
 {:deps {org.clojure/clojure       {:mvn/version "1.9.0"}
         org.clojure/clojurescript {:mvn/version "1.10.339"}
+        org.clojure/core.async    {:mvn/version "0.4.474"}
+        cljs-ajax                 {:mvn/version "0.7.5"}
         datascript                {:mvn/version "0.16.6"}
         re-frame                  {:mvn/version "0.10.6"}
         re-posh                   {:mvn/version "0.3.0"}
         district0x/bignumber      {:mvn/version "1.0.3"}
-        com.bhauman/figwheel-main {:mvn/version "0.1.9"}
-        day8.re-frame/http-fx     {:mvn/version "0.1.6"}}
+        com.bhauman/figwheel-main {:mvn/version "0.1.9"}}
  :paths ["src" "resources" "test" "example-src" "target"]
  :aliases {:build-node {:main-opts ["-m" "figwheel.main" "-O" "simple" "-bo" "dev-node"]}
            :min   {:main-opts ["-m" "figwheel.main" "-O" "advanced" "-bo" "dev"]}

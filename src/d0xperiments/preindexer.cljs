@@ -2,7 +2,7 @@
   (:require [datascript.core :as d]
             [bignumber.core :as bn]
             [cljs.nodejs :as nodejs]
-            [d0xperiments.core :refer [install-facts-filter get-past-events]]))
+            [d0xperiments.core :refer [install-facts-filter! get-past-events]]))
 
 (nodejs/enable-util-print!)
 
@@ -46,8 +46,8 @@
     ;; (reset! web3 web3-obj) ;; for repl
     ;; (reset! conn conn-obj)
 
-    (get-past-events web3-http facts-db-address 0 (partial transact-fact conn-obj))
-    (install-facts-filter web3-ws facts-db-address nil (partial transact-fact conn-obj))
+    #_(get-past-events web3-http facts-db-address 0 (partial transact-fact conn-obj))
+    #_(install-facts-filter web3-ws facts-db-address nil (partial transact-fact conn-obj))
 
     (doto (.createServer http
                          (fn [req res]

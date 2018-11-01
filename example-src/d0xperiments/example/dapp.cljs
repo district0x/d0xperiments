@@ -1,5 +1,5 @@
 (ns ^:figwheel-hooks d0xperiments.example.dapp
-  (:require [d0xperiments.core :refer [install-facts-filter]]
+  (:require [d0xperiments.core :refer [install-facts-filter! get-block-number get-past-events]]
             [datascript.core :as d]
             [bignumber.core :as bn]
             [re-posh.core :as re-posh]
@@ -8,12 +8,12 @@
             [day8.re-frame.http-fx]
             [ajax.core :as ajax]
             [clojure.string :as str]
-            [goog.string :as gstring]))
+            [goog.string :as gstring]
+            [clojure.core.async :as async]
+            [ajax.core :refer [ajax-request]])
+  (:require-macros [d0xperiments.utils :refer [<?]]))
 
 ;; TODO Add chema here!!!
-(def facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05")
-(def preindexer-url "http://localhost:1234")
-(def default-provider-url "ws://localhost:8549/")
 
 (defonce db-conn (atom nil))
 (defonce facts-db (atom nil))
@@ -33,8 +33,9 @@
 ;; IndexedDB ;;
 ;;;;;;;;;;;;;;;
 
-(defn init-db [ready-callback]
-  (let [req (js/window.indexedDB.open "FactsDB")]
+(defn init-indexed-db! []
+  (let [req (js/window.indexedDB.open "FactsDB")
+        out-ch (async/chan)]
     (set! (.-onupgradeneeded req) (fn [e]
                                     (let [db (-> e .-target .-result)
                                           store (.createObjectStore db "facts" #js {:keyPath "entity"})]
@@ -44,7 +45,8 @@
     (set! (.-onsuccess req) (fn [e]
                               (let [db (-> e .-target .-result)]
                                 (reset! facts-db db)
-                                (ready-callback))))))
+                                (async/put! out-ch true))))
+    out-ch))
 
 (defn build-indexed-db-fact [{:keys [entity attribute value add block-num]}]
   (let [attr-ns (namespace attribute)
@@ -66,84 +68,47 @@
     (doseq [fact facts]
       (.add facts-store (build-indexed-db-fact fact)))))
 
-(defn on-every-store-fact [callback-fn]
-  (let [transaction (.transaction @facts-db #js ["facts"] "readonly")
+(defn every-store-fact-ch []
+  (let [out-ch (async/chan)
+        transaction (.transaction @facts-db #js ["facts"] "readonly")
         facts-store (.objectStore transaction "facts")
         all-facts-cursor (.openCursor facts-store)]
     (set! (.-onsuccess all-facts-cursor)
           (fn [e]
             (let [c (-> e .-target .-result)]
               (when c
-                (callback-fn {:entity    (-> c .-value .-entity)
-                              :attribute (-> c .-value .-attribute)
-                              :value     (-> c .-value .-value)
-                              :add       (-> c .-value .-add)
-                              :block-num (-> c .-value .-blockNum)})
-                (.continue c)))))))
+                (async/put! out-ch {:entity    (-> c .-value .-entity)
+                                    :attribute (-> c .-value .-attribute)
+                                    :value     (-> c .-value .-value)
+                                    :add       (-> c .-value .-add)
+                                    :block-num (-> c .-value .-blockNum)})
+                (.continue c)))))
+    out-ch))
+
+(defn get-store-facts-count []
+  (let [out-ch (async/chan)
+        transaction (.transaction @facts-db #js ["facts"] "readonly")
+        facts-store (.objectStore transaction "facts")
+        count-req (.count facts-store)]
+    (set! (.-onsuccess count-req)
+          (fn [ev]
+            (let [facts-count (-> ev .-target .-result)]
+              (async/put! out-ch facts-count))))
+    out-ch))
+
+(defn last-stored-block-number []
+  (let [out-ch (async/chan)]
+    ;; TODO Implement this
+    (async/put! out-ch 0)
+    out-ch))
 
 ;;;;;;;;;;;;
 ;; Events ;;
 ;;;;;;;;;;;;
 
-(re-frame/reg-event-fx
- ::initialize
- (fn [{:keys [db ::index-db-facts?]} [_ last-block-num index-db-facts-count last-indexed-db-block]]
+#_(def facts-stop-watch-mark 59640)
 
-   (if (pos? index-db-facts-count)
-     {::install-datascript-db (d/create-conn)
-      ::load-and-transact-idexed-db-facts {:last-block-num last-block-num}
-      :db (assoc db :sync-progress 0)
-      ::mount-root true
-      ::install-facts-filter nil #_{:from-block last-indexed-db-block}} ;; TODO extract the number
-     {:dispatch [::load-snapshot {:last-block-num last-block-num}]})))
-
-(re-frame/reg-event-fx
- ::load-snapshot
- (fn [cofxs [_ {:keys [last-block-num]}]]
-   (.log js/console "Trying to fetch a pre indexed db")
-   {:http-xhrio {:method          :get
-                 :uri             preindexer-url
-                 :timeout         30000
-                 :response-format (ajax/raw-response-format)
-                 :on-success      [::snapshot-loaded]
-                 :on-failure      [::browser-full-sync {:last-block-num last-block-num}]}}))
-
-(re-frame/reg-event-fx
- ::snapshot-loaded
- (fn [{:keys [db]} [_ raw-res]]
-   (.log js/console "HEY, we got a pre indexed db, using that")
-   (let [res-map (cljs.reader/read-string raw-res)
-         db-conn (d/conn-from-db (:db res-map))
-         last-seen-block (:last-seen-block res-map)]
-     ;; This things needs to be in order????
-     {::install-datascript-db db-conn
-      ::store-all-facts (->> (d/datoms @db-conn :eavt)
-                             (map (fn [{:keys [e a v]}]
-                                    ;; HACK since we don't have block numbers in snapshot and
-                                    ;; don't want to add them to keep the snapshot as small as posible
-                                    {:entity e :attribute a :value v :block-num last-seen-block})))
-      ::mount-root true
-      :db (-> db
-              (assoc :facts-counter (count (d/datoms @db-conn :eavt)))
-              (assoc :last-seen-block last-seen-block)
-              (assoc :sync-progress 100))
-      ::install-facts-filter {:from-block (:last-seen-block res-map)}})))
-
-(re-frame/reg-event-fx
- ::browser-full-sync
- (fn [{:keys [db]} [_ {:keys [last-block-num]}]]
-   (.log js/console "We couldn't find a pre indexed db, no worries, syncing from blockchain from 0 to " last-block-num)
-   {::install-datascript-db (d/create-conn)
-    ::mount-root true
-    ::install-facts-filter {:from-block 8000}
-    :db (-> db
-            (assoc :init-sync-block 8000
-                   :dest-sync-block last-block-num
-                   :sync-progress 0))}))
-
-(def facts-stop-watch-mark 59640)
-
-(re-frame/reg-event-fx
+#_(re-frame/reg-event-fx
  ::add-fact
  (fn [{:keys [db]} [_ {:keys [entity attribute value block-num] :as fact} store?]]
 
@@ -184,45 +149,11 @@
 ;; FXs and COFXs ;;
 ;;;;;;;;;;;;;;;;;;;
 
-(re-frame/reg-fx
- ::install-facts-filter
- (fn [{:keys [from-block]}]
-   (.log js/console "Installing facts filter from block " from-block)
-   (let [filters (install-facts-filter js/web3js facts-db-address from-block
-                                       (fn [fact]
-                                         ;; so we give some space for the render to run and we can show progress
-                                         (js/setTimeout (fn [] (re-frame/dispatch [::add-fact fact true])) 0)))]
-     nil)))
-
-(re-frame/reg-fx
- ::load-and-transact-idexed-db-facts
- (fn []
-   (.log js/console "Adding facts from indexedDB")
-   (on-every-store-fact #(re-frame/dispatch [::add-fact % false]))))
-
-(re-frame/reg-fx
- ::install-datascript-db
- (fn [conn]
-   (.log js/console "Installing datascript db")
-   (reset! db-conn conn)
-   (re-posh/connect! conn)))
-
-(declare mount-root)
-
-(re-frame/reg-fx
- ::mount-root
- (fn [conn]
-   (mount-root)))
-
 (re-frame/reg-cofx
  ::datascript-db
  (fn [cofxs]
    (assoc cofxs ::datascript-db @@db-conn)))
 
-(re-frame/reg-fx
- ::indexed-db-store-fact
- (fn [{:keys [entity attribute value block-num] :as f}]
-   (store-fact f)))
 
 
 ;;;;;;;;;;;;;;;;;;;;
@@ -344,37 +275,117 @@
   (reagent/render [main]
                   (.getElementById js/document "app")))
 
-(defn ^:export init []
-  (.addEventListener js/window "load"
-                     (fn []
+(defn wait-for-load []
+  (let [out-ch (async/chan)]
+    (.addEventListener js/window "load" #(async/put! out-ch true))
+    out-ch))
 
-                       (.log js/console "Provider " (.-givenProvider js/web3))
-                       (set! js/web3js (js/Web3. (or (.-givenProvider js/web3)
-                                                     default-provider-url)))
+(defn install-datascript-db! [conn]
+  (reset! db-conn conn)
+  (re-posh/connect! conn))
 
-                       (.log js/console "Web3js is " js/web3js)
-                       (.log js/console "FactsContract is " )
+(defn fact->ds-fact [{:keys [entity attribute value]}]
+  [:db/add entity attribute value])
 
-                       (.getBlockNumber js/web3.eth
-                                        (fn [err last-block-num]
-                                          (.log js/console "Last block number is " last-block-num)
-                                          (.log js/console "Creating db")
-                                          (init-db (fn []
-                                                     (let [transaction (.transaction @facts-db #js ["facts"] "readonly")
-                                                           facts-store (.objectStore transaction "facts")
-                                                           count-req (.count facts-store)]
-                                                       (set! (.-onsuccess count-req)
-                                                             (fn [ev]
-                                                               (let [facts-count (-> ev .-target .-result)]
-                                                                (.log js/console "Indexed db initial facts count " facts-count)
-                                                                (re-frame/dispatch-sync [::initialize last-block-num facts-count]))))))))))))
+(defn load-db-snapshot [url]
+  (let [out-ch (async/chan)]
+    (ajax-request {:method          :get
+                   :uri             url
+                   :timeout         30000
+                   :response-format (ajax/raw-response-format)
+                   :handler (fn [[ok? err] result]
+                              (if ok?
+                               (let [res-map (cljs.reader/read-string result)]
+                                 (async/put! out-ch res-map))
+                               (async/close! out-ch)))})
+    out-ch))
 
-(comment
-
-
-
-
-
-
-
+(defn calc-progress [init end current]
   )
+
+;; progress-states
+;; {:satate :downloading-facts}
+;; {:satate :installing-facts :progress 100}
+;; {:satate :ready}
+
+(defn start [{:keys [progress-callback provider-url preindexer-url facts-db-address]}]
+  (set! js/web3js (js/Web3. (or (.-givenProvider js/web3) provider-url)))
+
+  (async/go
+    (let [last-block-so-far (atom 8000)]
+      (<? (wait-for-load))
+      (println "Page loaded")
+
+      (<? (init-indexed-db!))
+      (println "IndexedDB initialized")
+
+      (let [current-block-number (<? (get-block-number))
+            idb-facts-count (<? (get-store-facts-count))]
+
+        (println "Current block number is " current-block-number)
+        (println "IndexedDB contains " idb-facts-count "facts")
+
+        (if (pos? idb-facts-count)
+          (let [last-stored-bn (<? (last-stored-block-number))
+                idb-facts (->> (<? (async/into [] (every-store-fact-ch)))
+                               (mapv fact->ds-fact))
+                ds-db-conn (d/create-conn)]
+
+            (println "We have facts on IndexedDB")
+
+            (install-datascript-db! ds-db-conn)
+            (d/transact! ds-db-conn idb-facts))
+
+          (let [{:keys [db last-seen-block]} (<? (load-db-snapshot preindexer-url))]
+            (println "We DON'T have IndexedDB facts, lets try to load a snapshot")
+            (if db
+              (do
+                (reset! last-block-so-far last-seen-block)
+                (println "we have a snapshot, installing it")
+                (install-datascript-db! (d/conn-from-db db))
+                (store-facts (->> (d/datoms db :eavt)
+                                  (map (fn [{:keys [e a v]}]
+                                         ;; HACK since we don't have block numbers in snapshot and
+                                         ;; don't want to add them to keep the snapshot as small as posible
+                                         {:entity e :attribute a :value v :block-num last-seen-block})))))
+              (println "We couldn't download a snapshot"))))
+
+        ;; we already or got facts from IndexedDB, downloaded a snapshot, or we don't have anything
+        (println "Let's sync the remainning facts directly from the browser")
+        (when-not @db-conn (install-datascript-db! (d/create-conn)))
+
+        (progress-callback {:state :downloading-facts})
+
+        (let [past-facts (<? (get-past-events js/web3js facts-db-address @last-block-so-far))]
+          (progress-callback {:state :installing-facts})
+          (d/transact! @db-conn (mapv fact->ds-fact past-facts))
+          (store-facts past-facts))
+
+        ;; Reporting is 50% slower than transacting facts all together
+        #_(let [past-facts (<? (get-past-events js/web3js facts-db-address @last-block-so-far))]
+          (doseq [pf past-facts]
+            (progress-callback {:state :installing-facts :progress (calc-progress @last-block-so-far
+                                                                                  current-block-number
+                                                                                  (:block-num pf))})
+            (d/transact! @db-conn [(fact->ds-fact pf)])
+            (store-fact pf))))
+
+
+      ;; mount reagent component
+      (mount-root)
+
+      ;; keep listening to new facts and transacting them to datascript db
+      (let [new-facts-ch (install-facts-filter! js/web3js facts-db-address)]
+        (loop [nf (<? new-facts-ch)]
+          (d/transact! @db-conn (fact->ds-fact nf))
+          (recur (<? new-facts-ch))))
+      (println "New facts listener installed")
+      (progress-callback {:state :ready}))))
+
+(defn ^:export init []
+
+  (start {:provider-url "ws://localhost:8549/"
+          :preindexer-url "http://localhost:1234"
+          :facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05"
+          :progress-callback (fn [{:keys [state] :as progress}]
+                               (println progress))}))
