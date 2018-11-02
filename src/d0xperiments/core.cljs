@@ -1,10 +1,10 @@
 (ns ^:figwheel-hooks d0xperiments.core
   (:require [bignumber.core :as bn]
             [clojure.core.async :as async])
-  (:require-macros [d0xperiments.core :refer [facts-abi-string]]))
+  (:require-macros [d0xperiments.utils :refer [slurpf]]))
 
 
-(def facts-db-abi (-> (facts-abi-string "./contracts/build/FactsDb.abi")
+(def facts-db-abi (-> (slurpf "./contracts/build/FactsDb.abi")
                       js/JSON.parse))
 
 (defn get-block-number []

@@ -3,7 +3,6 @@
             [datascript.core :as d]
             [clojure.core.async :as async]
             [ajax.core :refer [ajax-request] :as ajax]
-
             [d0xperiments.indexeddb :as idb])
   (:require-macros [d0xperiments.utils :refer [<?]]))
 
@@ -30,8 +29,9 @@
                                 (async/close! out-ch)))})
     out-ch))
 
-(defn install [{:keys [progress-cb provider-url preindexer-url facts-db-address]}]
+(defn install [{:keys [progress-cb provider-url preindexer-url facts-db-address ds-schema]}]
   (println "STARTING:" (.getTime (js/Date.)))
+
   (async/go
     (try
       (let [last-block-so-far (atom 0)
@@ -55,7 +55,7 @@
             (let [last-stored-bn (<? (idb/last-stored-block-number))
                   idb-facts (->> (<? (idb/every-store-fact-ch))
                                  (mapv fact->ds-fact))
-                  ds-db-conn (d/create-conn)]
+                  ds-db-conn (d/create-conn ds-schema)]
               (println "We have facts on IndexedDB. Last stored block number is " last-stored-bn)
               (reset! last-block-so-far last-stored-bn)
               (d/transact! ds-db-conn idb-facts)
@@ -80,7 +80,7 @@
           ;; we already or got facts from IndexedDB or downloaded a snapshot, or we don't have anything
           ;; in any case sync the remainning from blockchain
           (println "Let's sync the remainning facts directly from the blockchain. Last block seen " @last-block-so-far)
-          (when-not @db-conn (reset! db-conn (d/create-conn)))
+          (when-not @db-conn (reset! db-conn (d/create-conn ds-schema)))
 
           (progress-cb {:state :downloading-facts})
 

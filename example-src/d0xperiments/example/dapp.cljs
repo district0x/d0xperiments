@@ -6,11 +6,14 @@
             [reagent.core :as reagent]
             [clojure.string :as str]
             [goog.string :as gstring]
-            [d0xperiments.browser-installer :as installer]))
+            [d0xperiments.browser-installer :as installer])
+  (:require-macros [d0xperiments.utils :refer [slurpf]]))
 
 ;; TODO Add chema here!!!
 
 (defonce db-conn (atom nil))
+(def datascript-schema (-> (slurpf "./example-src/d0xperiments/example/db_schema.edn")
+                           cljs.reader/read-string ))
 
 ;;;;;;;;;;;;
 ;; Events ;;
@@ -188,4 +191,5 @@
                       :progress-cb (fn [{:keys [state] :as progress}]
                                      (when (= state :datascript-db-ready)
                                        (install-datascript-db! (:db-conn progress)))
-                                     (re-frame/dispatch [:app-state-change state]))}))
+                                     (re-frame/dispatch [:app-state-change state]))
+                      :ds-schema datascript-schema}))

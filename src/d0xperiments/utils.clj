@@ -6,3 +6,6 @@
      (if (isa? js/Error v#)
        (throw v#)
        v#)))
+
+(defmacro slurpf [path]
+  (slurp path))
