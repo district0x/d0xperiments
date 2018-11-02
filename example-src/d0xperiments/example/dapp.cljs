@@ -38,7 +38,8 @@
         out-ch (async/chan)]
     (set! (.-onupgradeneeded req) (fn [e]
                                     (let [db (-> e .-target .-result)
-                                          store (.createObjectStore db "facts" #js {:keyPath "entity"})]
+                                          store (.createObjectStore db "facts" #js {:keyPath "factId" :autoIncrement true})]
+                                      (.createIndex store "blockNum" "blockNum" #js {:unique false})
                                       (set! (-> store .-transaction .-oncomplete)
                                             (fn [oce]
                                               (reset! facts-db db))))))
@@ -64,25 +65,31 @@
 
 (defn store-facts [facts]
   (let [transaction (.transaction @facts-db #js ["facts"] "readwrite")
-        facts-store (.objectStore transaction "facts")]
-    (doseq [fact facts]
-      (.add facts-store (build-indexed-db-fact fact)))))
+        facts-store (.objectStore transaction "facts")
+        put-next (fn put-next [[x & r]]
+                   (when x
+                     (let [t (.add facts-store (build-indexed-db-fact x))]
+                       (set! (.-onsuccess t) (partial put-next r))
+                       (set! (.-onerror t) (fn [& args] (.log js/console args))))))]
+    (put-next facts)))
 
 (defn every-store-fact-ch []
   (let [out-ch (async/chan)
         transaction (.transaction @facts-db #js ["facts"] "readonly")
         facts-store (.objectStore transaction "facts")
-        all-facts-cursor (.openCursor facts-store)]
-    (set! (.-onsuccess all-facts-cursor)
+        all-facts-req (.getAll facts-store)]
+    (set! (.-onsuccess all-facts-req)
           (fn [e]
-            (let [c (-> e .-target .-result)]
-              (when c
-                (async/put! out-ch {:entity    (-> c .-value .-entity)
-                                    :attribute (-> c .-value .-attribute)
-                                    :value     (-> c .-value .-value)
-                                    :add       (-> c .-value .-add)
-                                    :block-num (-> c .-value .-blockNum)})
-                (.continue c)))))
+            (->> e
+                .-target
+                .-result
+                (map (fn [c]
+                       {:entity    (-> c .-entity)
+                        :attribute (keyword (-> c .-attribute))
+                        :value     (-> c .-value)
+                        :add       (-> c .-add)
+                        :block-num (-> c .-blockNum)}))
+                (async/put! out-ch))))
     out-ch))
 
 (defn get-store-facts-count []
@@ -97,33 +104,21 @@
     out-ch))
 
 (defn last-stored-block-number []
-  (let [out-ch (async/chan)]
-    ;; TODO Implement this
-    (async/put! out-ch 0)
+  (let [out-ch (async/chan)
+        transaction (.transaction @facts-db #js ["facts"] "readonly")
+        facts-store (.objectStore transaction "facts")
+        block-num-index (.index facts-store "blockNum")
+        oc-req (.openCursor block-num-index nil "prev")]
+
+    (set! (.-onsuccess oc-req)
+          (fn [ev]
+            (let [max-block-num (-> ev .-target .-result .-value .-blockNum)]
+              (async/put! out-ch max-block-num))))
     out-ch))
 
 ;;;;;;;;;;;;
 ;; Events ;;
 ;;;;;;;;;;;;
-
-#_(def facts-stop-watch-mark 59640)
-
-#_(re-frame/reg-event-fx
- ::add-fact
- (fn [{:keys [db]} [_ {:keys [entity attribute value block-num] :as fact} store?]]
-
-   #_(when (= (:facts-counter db)  facts-stop-watch-mark)
-     (.log js/console "Synchronized " facts-stop-watch-mark " facts in " (- (.getTime (js/Date.))
-                                                                            (:filters-start-time-millis db))
-           "millis"))
-   (.log js/console "." store?)
-   (cond-> {:transact [[:db/add entity attribute value]]
-            :db (-> db
-                    (assoc :sync-progress (quot (* 100 (- block-num (:init-sync-block db)))
-                                                (- (:dest-sync-block db) (:init-sync-block db))))
-                    (update :facts-counter (fnil inc 0))
-                    (update :last-seen-block (partial (fnil max 0) block-num)))}
-     store? (assoc ::indexed-db-store-fact fact))))
 
 ;; Search by title matching a regular expression
 ;; sort-by title
@@ -145,6 +140,11 @@
                                               (map first)
                                               (take 20)))})))
 
+(re-frame/reg-event-db
+ :app-state-change
+ (fn [db [_ state]]
+   (assoc db :app-state state)))
+
 ;;;;;;;;;;;;;;;;;;;
 ;; FXs and COFXs ;;
 ;;;;;;;;;;;;;;;;;;;
@@ -161,15 +161,9 @@
 ;;;;;;;;;;;;;;;;;;;;
 
 (re-frame/reg-sub
- ::sync-progress
+ ::app-state
  (fn [db _]
-   (:sync-progress db)))
-
-
-(re-frame/reg-sub
- ::tracked-stats
- (fn [db _]
-   (select-keys db [:facts-counter :last-seen-block])))
+   (:app-state db)))
 
 (re-posh/reg-sub
  ::entities-count
@@ -221,19 +215,15 @@
 ;;;;;;;;
 
 (defn hud []
-  (let [{:keys [facts-counter last-seen-block]} @(re-frame/subscribe [::tracked-stats])]
-   [:ul {}
-    [:li (str "Last seen block: " last-seen-block)]
-    [:li (str "Facts count: " facts-counter)]
-    #_[:li [:ul
-          [:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
-          [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
-          [:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
-          [:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
-          [:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
-          [:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
-          [:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
-          [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]]]))
+  [:ul
+   [:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
+   [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
+   [:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
+   [:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
+   [:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
+   [:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
+   [:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
+   [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]])
 
 (defn search-item [id]
   (let [[title address] @(re-frame/subscribe [::meme id])]
@@ -256,14 +246,15 @@
           [search-item m])]])))
 
 (defn main []
-  (let [sp @(re-frame/subscribe [::sync-progress])]
+  (let [app-state @(re-frame/subscribe [::app-state])]
     [:div
-     (cond
-       (zero? sp)   [:div "Downloading app data, please wait..."]
-       (< 0 sp 100) [:div (gstring/format "Installing app (%d%%)" sp)]
-       :else        [:div
-                     [hud]
-                     [meme-factory-search]])]))
+     (case app-state
+       :downloading-facts [:div "Downloading app data, please wait..."]
+       :installing-facts  [:div "Installing app"]
+       :ready [:div
+               [hud]
+               [meme-factory-search]]
+       [:div])]))
 
 
  ;;;;;;;;;;
@@ -293,99 +284,91 @@
                    :uri             url
                    :timeout         30000
                    :response-format (ajax/raw-response-format)
-                   :handler (fn [[ok? err] result]
+                   :handler (fn [[ok? res] result]
                               (if ok?
-                               (let [res-map (cljs.reader/read-string result)]
-                                 (async/put! out-ch res-map))
-                               (async/close! out-ch)))})
+                                (let [res-map (cljs.reader/read-string res)]
+                                  (async/put! out-ch res-map))
+                                (async/close! out-ch)))})
     out-ch))
-
-(defn calc-progress [init end current]
-  )
 
 ;; progress-states
 ;; {:satate :downloading-facts}
-;; {:satate :installing-facts :progress 100}
+;; {:satate :installing-facts}
 ;; {:satate :ready}
+;; for 9000 blocks / 61230 facts
+;; 26 sec full install
+;; 4,8 sec snapshot download + install (~800Kb)
+;; 3,6 sec from IndexedDB
+
 
 (defn start [{:keys [progress-callback provider-url preindexer-url facts-db-address]}]
   (set! js/web3js (js/Web3. (or (.-givenProvider js/web3) provider-url)))
-
+  (println "STARTING:" (.getTime (js/Date.)))
   (async/go
-    (let [last-block-so-far (atom 8000)]
-      (<? (wait-for-load))
-      (println "Page loaded")
+    (try
+      (let [last-block-so-far (atom 0)]
+        (<? (wait-for-load))
+        (println "Page loaded")
 
-      (<? (init-indexed-db!))
-      (println "IndexedDB initialized")
+        (<? (init-indexed-db!))
+        (println "IndexedDB initialized")
 
-      (let [current-block-number (<? (get-block-number))
-            idb-facts-count (<? (get-store-facts-count))]
+        (let [current-block-number (<? (get-block-number))
+              idb-facts-count (<? (get-store-facts-count))]
 
-        (println "Current block number is " current-block-number)
-        (println "IndexedDB contains " idb-facts-count "facts")
+          (println "Current block number is " current-block-number)
+          (println "IndexedDB contains " idb-facts-count "facts")
 
-        (if (pos? idb-facts-count)
-          (let [last-stored-bn (<? (last-stored-block-number))
-                idb-facts (->> (<? (async/into [] (every-store-fact-ch)))
-                               (mapv fact->ds-fact))
-                ds-db-conn (d/create-conn)]
+          (if (pos? idb-facts-count)
+            (let [last-stored-bn (<? (last-stored-block-number))
+                  idb-facts (->> (<? (every-store-fact-ch))
+                                 (mapv fact->ds-fact))
+                  ds-db-conn (d/create-conn)]
+              (println "We have facts on IndexedDB. Last stored block number is " last-stored-bn)
+              (reset! last-block-so-far last-stored-bn)
+              (install-datascript-db! ds-db-conn)
+              (d/transact! ds-db-conn idb-facts))
 
-            (println "We have facts on IndexedDB")
+            ;; NO IndexDB facts
 
-            (install-datascript-db! ds-db-conn)
-            (d/transact! ds-db-conn idb-facts))
+            (let [_ (println "We DON'T have IndexedDB facts, lets try to load a snapshot")
+                  {:keys [db last-seen-block]} (<? (load-db-snapshot preindexer-url))]
+              (if db
+                (do
+                  (reset! last-block-so-far last-seen-block)
+                  (println "we have a snapshot, installing it")
+                  (install-datascript-db! (d/conn-from-db db))
+                  (store-facts (->> (d/datoms db :eavt)
+                                    (map (fn [{:keys [e a v block-num]}]
+                                           {:entity e :attribute a :value v :block-num block-num})))))
+                (println "We couldn't download a snapshot"))))
 
-          (let [{:keys [db last-seen-block]} (<? (load-db-snapshot preindexer-url))]
-            (println "We DON'T have IndexedDB facts, lets try to load a snapshot")
-            (if db
-              (do
-                (reset! last-block-so-far last-seen-block)
-                (println "we have a snapshot, installing it")
-                (install-datascript-db! (d/conn-from-db db))
-                (store-facts (->> (d/datoms db :eavt)
-                                  (map (fn [{:keys [e a v]}]
-                                         ;; HACK since we don't have block numbers in snapshot and
-                                         ;; don't want to add them to keep the snapshot as small as posible
-                                         {:entity e :attribute a :value v :block-num last-seen-block})))))
-              (println "We couldn't download a snapshot"))))
+          ;; we already or got facts from IndexedDB, downloaded a snapshot, or we don't have anything
+          (println "Let's sync the remainning facts directly from the browser. Last block seen " @last-block-so-far)
+          (when-not @db-conn (install-datascript-db! (d/create-conn)))
 
-        ;; we already or got facts from IndexedDB, downloaded a snapshot, or we don't have anything
-        (println "Let's sync the remainning facts directly from the browser")
-        (when-not @db-conn (install-datascript-db! (d/create-conn)))
+          (progress-callback {:state :downloading-facts})
 
-        (progress-callback {:state :downloading-facts})
+          (let [past-facts (<? (get-past-events js/web3js facts-db-address @last-block-so-far))]
+            (progress-callback {:state :installing-facts})
+            (d/transact! @db-conn (mapv fact->ds-fact past-facts))
+            (store-facts past-facts)))
 
-        (let [past-facts (<? (get-past-events js/web3js facts-db-address @last-block-so-far))]
-          (progress-callback {:state :installing-facts})
-          (d/transact! @db-conn (mapv fact->ds-fact past-facts))
-          (store-facts past-facts))
+        (println "New facts listener installed")
+        (progress-callback {:state :ready})
+        (println "DONE:" (.getTime (js/Date.)))
 
-        ;; Reporting is 50% slower than transacting facts all together
-        #_(let [past-facts (<? (get-past-events js/web3js facts-db-address @last-block-so-far))]
-          (doseq [pf past-facts]
-            (progress-callback {:state :installing-facts :progress (calc-progress @last-block-so-far
-                                                                                  current-block-number
-                                                                                  (:block-num pf))})
-            (d/transact! @db-conn [(fact->ds-fact pf)])
-            (store-fact pf))))
-
-
-      ;; mount reagent component
-      (mount-root)
-
-      ;; keep listening to new facts and transacting them to datascript db
-      (let [new-facts-ch (install-facts-filter! js/web3js facts-db-address)]
-        (loop [nf (<? new-facts-ch)]
-          (d/transact! @db-conn (fact->ds-fact nf))
-          (recur (<? new-facts-ch))))
-      (println "New facts listener installed")
-      (progress-callback {:state :ready}))))
+        ;; keep listening to new facts and transacting them to datascript db
+        (let [new-facts-ch (install-facts-filter! js/web3js facts-db-address)]
+          (loop [nf (<? new-facts-ch)]
+            (d/transact! @db-conn [(fact->ds-fact nf)])
+            (recur (<? new-facts-ch)))))
+      (catch js/Error e (.log js/console e)))))
 
 (defn ^:export init []
-
+  (mount-root)
   (start {:provider-url "ws://localhost:8549/"
           :preindexer-url "http://localhost:1234"
           :facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05"
           :progress-callback (fn [{:keys [state] :as progress}]
-                               (println progress))}))
+                               (re-frame/dispatch [:app-state-change state]))}))

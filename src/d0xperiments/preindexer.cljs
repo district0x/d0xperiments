@@ -2,7 +2,9 @@
   (:require [datascript.core :as d]
             [bignumber.core :as bn]
             [cljs.nodejs :as nodejs]
-            [d0xperiments.core :refer [install-facts-filter! get-past-events]]))
+            [d0xperiments.core :refer [install-facts-filter! get-past-events]]
+            [clojure.core.async :as async])
+  (:require-macros [d0xperiments.utils :refer [<?]]))
 
 (nodejs/enable-util-print!)
 
@@ -30,7 +32,8 @@
   (d/transact! conn [[:db/add
                       entity
                       attribute
-                      value]]))
+                      value
+                      block-num]]))
 
 
 ;; TODO add tools.cli
@@ -46,8 +49,17 @@
     ;; (reset! web3 web3-obj) ;; for repl
     ;; (reset! conn conn-obj)
 
-    #_(get-past-events web3-http facts-db-address 0 (partial transact-fact conn-obj))
-    #_(install-facts-filter web3-ws facts-db-address nil (partial transact-fact conn-obj))
+    (async/go
+      (let [past-events (<? (get-past-events web3-http facts-db-address 0))
+            new-facts-ch (install-facts-filter! web3-ws facts-db-address)]
+        ;; transact past facts
+        (doseq [f past-events]
+          (transact-fact conn-obj f))
+
+        ;; keep forever transacting new facts
+        (loop [nf (<? new-facts-ch)]
+          (d/transact! conn-obj nf)
+          (recur (<? new-facts-ch)))))
 
     (doto (.createServer http
                          (fn [req res]
