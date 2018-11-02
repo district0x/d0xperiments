@@ -50,15 +50,18 @@
     ;; (reset! conn conn-obj)
 
     (async/go
+      (println "Downloading past events, please wait...")
       (let [past-events (<? (get-past-events web3-http facts-db-address 0))
             new-facts-ch (install-facts-filter! web3-ws facts-db-address)]
+        (println "Past events downloaded, replaying...")
         ;; transact past facts
         (doseq [f past-events]
           (transact-fact conn-obj f))
 
+        (println "Old events replayed. Watching for more events...")
         ;; keep forever transacting new facts
         (loop [nf (<? new-facts-ch)]
-          (d/transact! conn-obj nf)
+          (transact-fact conn-obj nf)
           (recur (<? new-facts-ch)))))
 
     (doto (.createServer http
