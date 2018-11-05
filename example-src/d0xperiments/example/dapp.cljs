@@ -4,6 +4,7 @@
             [re-posh.core :as re-posh]
             [re-frame.core :as re-frame]
             [reagent.core :as reagent]
+            [posh.reagent :as posh]
             [clojure.string :as str]
             [goog.string :as gstring]
             [d0xperiments.browser-installer :as installer])
@@ -91,41 +92,32 @@
    (:meme-search-results db)))
 
 ;; Don't know why pull isn't working
-#_(re-posh/reg-sub
- ::meme-b
+(re-posh/reg-sub
+ ::meme
  (fn [_ [_ id]]
    {:type    :pull
-    :pattern '[:meme/title]
+    :pattern '[*]
     :id      id}))
-
-(re-posh/reg-query-sub
- ::meme
- '[:find [?t ?rea]
-   :in $ ?eid
-   :where
-   [?eid :reg-entry/address ?rea]
-   [?eid :meme/title ?t]])
-
 
 ;;;;;;;;
 ;; UI ;;
 ;;;;;;;;
 
-(defn hud []
-  (fn []
-   [:ul
-    #_[:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
-    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
-    #_[:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
-    #_[:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
-    #_[:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
-    #_[:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
-    #_[:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
-    #_[:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]))
+(defn hud [startup-time-in-millis]
+  [:ul
+   [:li (str "Started in: " startup-time-in-millis " millis") ]
+   #_[:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
+   [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
+   #_[:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
+   #_[:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
+   #_[:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
+   #_[:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
+   #_[:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
+   #_[:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]])
 
 (defn search-item [id]
-  (let [[title address] @(re-frame/subscribe [::meme id])]
-    [:li (str "Title: " title " @ " address)]))
+  (let [m @(re-frame/subscribe [::meme id])]
+    [:li (str m)]))
 
 (defn meme-factory-search []
   (let [search-val (reagent/atom "")
@@ -146,12 +138,13 @@
 (defn main []
   (let [app-state @(re-frame/subscribe [::app-state])]
     [:div
-     (case app-state
+
+     (case (:state app-state)
        :downloading-facts   [:div "Downloading app data, please wait..."]
        :installing-facts    [:div "Installing app"]
        :datascript-db-ready [:div "Db ready"]
        :ready [:div
-               [hud]
+               [hud (:startup-time-in-millis app-state)]
                [meme-factory-search]]
        [:div])]))
 
@@ -174,9 +167,16 @@
 ;; {:satate :ready}
 
 ;; for 9000 blocks / 61230 facts
+
+;; DESKTOP
 ;; 26 sec full install
 ;; 4,8 sec snapshot download + install (~800Kb)
 ;; 3,6 sec from IndexedDB
+
+;; MOBILE
+;;  sec full install
+;; 14,7 sec snapshot download + install (~800Kb)
+;;  sec from IndexedDB
 
 
 (defn install-datascript-db! [conn]
@@ -185,11 +185,11 @@
 
 (defn ^:export init []
   (mount-root)
-  (installer/install {:provider-url "ws://localhost:8549/"
-                      :preindexer-url "http://localhost:1234"
+  (installer/install {:provider-url #_"ws://localhost:8549/" "ws://192.168.1.8:8549/"
+                      :preindexer-url #_"http://localhost:1234" "http://192.168.1.8:1234"
                       :facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05"
                       :progress-cb (fn [{:keys [state] :as progress}]
                                      (when (= state :datascript-db-ready)
                                        (install-datascript-db! (:db-conn progress)))
-                                     (re-frame/dispatch [:app-state-change state]))
+                                     (re-frame/dispatch [:app-state-change progress]))
                       :ds-schema datascript-schema}))

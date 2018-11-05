@@ -59,6 +59,7 @@ but against a Datascript db, using datalog and pull instead of graphql.
 - Can use apps (at least for browsing) offline
 - No need for custom server implementation, syncer can be a generic component
 - Less complex than our current UI architecture (graphql on client/server, data normalization, etc)
+- Since arch is much simpler it should be easier to attract other developers to collaborate with d0x
 
 ** Notes
 
@@ -73,7 +74,19 @@ try to support super big applications.
 I also think it is aligned and also push in the direction of the ultimate district0x goal that is to create a tool for non technical users
 to be able to create districts.
 
-*** Event cost (transfered to users)
+** On being able to use the app without full sync
+
+   [[https://github.com/mpdairy/posh/][Posh]] has a set of functions `filter-pull`, `filter-q`, etc, that instead of returning the results, it returns a filtered db with everything
+   touched by the pull or query.
+   The same preindexer server can expose a endpoint that can recieve pull or datalog queries and return the necesary datoms to generate those results, which
+   can be requested and transacted by the browser in its internal datascript db.
+
+** On IPFS integration
+
+   Facts defined as :ipfs/meta can be automatically grabbed by the indexer, which can retrieve data. If meta is stored as a json collection of datoms, then
+   they can be automatically incorporated inside datascript db, adding the facts to the same entity id the ipfs/meta hash was on.
+
+** On Event cost (transfered to users)
 
 #+BEGIN_SRC solidity
 
@@ -91,7 +104,3 @@ transactUInt(1, "reg-entry/challenge-period-end", xxxx)     //   375 + 32 + 20 +
 #+END_SRC
 
 for constructing a meme it is 0.004 US$ that user is paying extra
-
-** Not in post / things to comment
-
-- Since arch is much simpler it should be easier to attract other developers to collaborate with d0x

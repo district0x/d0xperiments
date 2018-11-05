@@ -4,6 +4,10 @@
 (defonce facts-db (atom nil))
 
 (defn init-indexed-db! []
+  (set! (.-indexedDB js/window) (or (.-indexedDB js/window)
+                                    (.-mozIndexedDB js/window)
+                                    (.-webkitIndexedDB js/window)
+                                    (.-msIndexedDB js/window)))
   (let [req (js/window.indexedDB.open "FactsDB")
         out-ch (async/chan)]
     (set! (.-onupgradeneeded req) (fn [e]
@@ -34,13 +38,14 @@
     (.add facts-store (build-indexed-db-fact fact))))
 
 (defn store-facts [facts]
+  (.log js/console "About to store " (count facts) " facts")
   (let [transaction (.transaction @facts-db #js ["facts"] "readwrite")
         facts-store (.objectStore transaction "facts")
         put-next (fn put-next [[x & r]]
                    (when x
                      (let [t (.add facts-store (build-indexed-db-fact x))]
                        (set! (.-onsuccess t) (partial put-next r))
-                       (set! (.-onerror t) (fn [& args] (.log js/console args))))))]
+                       (set! (.-onerror t) (fn [& args] (.log js/console "ERROR storing facts" args))))))]
     (put-next facts)))
 
 (defn every-store-fact-ch []

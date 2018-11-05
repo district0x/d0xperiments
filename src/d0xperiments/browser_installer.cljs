@@ -30,11 +30,10 @@
     out-ch))
 
 (defn install [{:keys [progress-cb provider-url preindexer-url facts-db-address ds-schema]}]
-  (println "STARTING:" (.getTime (js/Date.)))
-
   (async/go
     (try
-      (let [last-block-so-far (atom 0)
+      (let [stop-watch-start (.getTime (js/Date.))
+            last-block-so-far (atom 0)
             db-conn (atom nil)]
         (<? (wait-for-load))
         (println "Page loaded")
@@ -92,8 +91,8 @@
         (progress-cb {:state :datascript-db-ready :db-conn @db-conn})
 
         (println "New facts listener installed")
-        (progress-cb {:state :ready})
-        (println "DONE:" (.getTime (js/Date.)))
+        (progress-cb {:state :ready :startup-time-in-millis (- (.getTime (js/Date.)) stop-watch-start)})
+        (println "Started in :" (- (.getTime (js/Date.)) stop-watch-start) " millis")
 
         ;; keep listening to new facts and transacting them to datascript db
         (let [new-facts-ch (install-facts-filter! js/web3js facts-db-address)]

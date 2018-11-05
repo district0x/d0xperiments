@@ -5,6 +5,7 @@
         datascript                {:mvn/version "0.16.6"}
         re-frame                  {:mvn/version "0.10.6"}
         re-posh                   {:mvn/version "0.3.0"}
+        posh                      {:mvn/version "0.5.6-patched"}
         district0x/bignumber      {:mvn/version "1.0.3"}
         com.bhauman/figwheel-main {:mvn/version "0.1.9"}}
  :paths ["src" "resources" "test" "example-src" "target"]
