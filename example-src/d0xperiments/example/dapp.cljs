@@ -71,16 +71,6 @@
  ::attr-count
  attr-count-query)
 
-#_(re-posh/reg-query-sub
- ::meme-search
- '[:find ?eid
-   :in $ ?text ?re
-   :where
-   [?eid :reg-entry/address]
-   [?eid :meme/title ?title]
-   [(re-matches ?re ?title)]
-   #_[(or [?eid :reg-etry/tag ?text])]])
-
 (re-frame/reg-sub
  ::meme-search-results
  (fn [db [_]]
@@ -195,6 +185,8 @@
                                        (re-frame/dispatch [:app-state-change progress]))
                         :ds-conn dc
 
-                        :pre-fetch-datoms [{:type    :pull
-                                            :pattern '[*]
-                                            :ids      [example-meme-id]}]})))
+                        ;; :pre-fetch-datoms [{:type    :pull
+                        ;;                     :pattern '[*]
+                        ;;                     :ids      [example-meme-id]}]
+
+                        })))
