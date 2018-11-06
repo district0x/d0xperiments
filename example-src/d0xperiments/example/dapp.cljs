@@ -63,18 +63,13 @@
  (fn [db _]
    (:app-state db)))
 
-(re-posh/reg-sub
- ::entities-count
- (fn [db _]
-   {:type :query
-    :query '[:find (count ?eid)
-             :where [?eid]]}))
+(def attr-count-query '[:find (count ?eid)
+                        :in $ ?attr
+                        :where [?eid ?attr]])
 
 (re-posh/reg-query-sub
  ::attr-count
- '[:find (count ?eid)
-   :in $ ?attr
-   :where [?eid ?attr]])
+ attr-count-query)
 
 #_(re-posh/reg-query-sub
  ::meme-search
@@ -106,14 +101,14 @@
 (defn hud [startup-time-in-millis]
   [:ul
    [:li (str "Started in: " startup-time-in-millis " millis") ]
-   #_[:li (str "Entities count: " (->> @(re-frame/subscribe [::entities-count]) first first))]
    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
-   #_[:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
-   #_[:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
-   #_[:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
-   #_[:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
-   #_[:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
-   #_[:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]])
+   [:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
+   [:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
+   [:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
+   [:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
+   [:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
+   [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]])
+
 
 (defn search-item [id]
   (let [m @(re-frame/subscribe [::meme id])]
@@ -135,17 +130,22 @@
           ^{:key m}
           [search-item m])]])))
 
+(def example-meme-id 1.3254459306746723e+48)
+
 (defn main []
   (let [app-state @(re-frame/subscribe [::app-state])]
     [:div
-
+     [:div {:style {:color :red}}
+      [hud (:startup-time-in-millis app-state)]
+      [:h3 "Example meme"]
+      [:ul (for [[k v] @(re-frame/subscribe [::meme example-meme-id])]
+             ^{:key k}
+             [:li (str (name k) " : " v)])]]
      (case (:state app-state)
        :downloading-facts   [:div "Downloading app data, please wait..."]
        :installing-facts    [:div "Installing app"]
        :datascript-db-ready [:div "Db ready"]
-       :ready [:div
-               [hud (:startup-time-in-millis app-state)]
-               [meme-factory-search]]
+       :ready [meme-factory-search]
        [:div])]))
 
 
@@ -184,12 +184,17 @@
   (re-posh/connect! conn))
 
 (defn ^:export init []
-  (mount-root)
-  (installer/install {:provider-url "ws://localhost:8549/"
-                      :preindexer-url "http://localhost:1234"
-                      :facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05"
-                      :progress-cb (fn [{:keys [state] :as progress}]
-                                     (when (= state :datascript-db-ready)
-                                       (install-datascript-db! (:db-conn progress)))
-                                     (re-frame/dispatch [:app-state-change progress]))
-                      :ds-schema datascript-schema}))
+  (let [dc (d/create-conn datascript-schema)]
+    (install-datascript-db! dc)
+    (mount-root)
+
+    (installer/install {:provider-url "ws://localhost:8549/"
+                        :preindexer-url "http://localhost:1234"
+                        :facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05"
+                        :progress-cb (fn [{:keys [state] :as progress}]
+                                       (re-frame/dispatch [:app-state-change progress]))
+                        :ds-conn dc
+
+                        :pre-fetch-datoms [{:type    :pull
+                                            :pattern '[*]
+                                            :ids      [example-meme-id]}]})))

@@ -41,23 +41,25 @@
 ;; TODO add tools.cli
 
 
-(defn datoms-for [db pulls-and-qs]
-  (reduce (fn [datoms-set {:keys [type] :as x}]
-            (into datoms-set (case type
-                               :query (-> (posh-q/q-analyze {:q d/q} [:datoms]
-                                                            (:query x)
-                                                            (into [db] (:vars x)))
-                                          :datoms first second)
-                               :pull (->> (posh-pull/pull-affected-datoms d/pull db (:pattern x) (first (:ids x)))
-                                          (posh-pull/generate-affected-tx-datoms-for-pull (:schema db)))
-                               nil)))
-   #{}
-   pulls-and-qs))
+(def datoms-for
+  (memoize
+   (fn[db pulls-and-qs]
+     (reduce (fn [datoms-set {:keys [type] :as x}]
+               (into datoms-set (case type
+                                  :query (-> (posh-q/q-analyze {:q d/q} [:datoms]
+                                                               (:query x)
+                                                               (into [db] (:vars x)))
+                                             :datoms first second)
+                                  :pull (->> (posh-pull/pull-affected-datoms d/pull db (:pattern x) (first (:ids x)))
+                                             (posh-pull/generate-affected-tx-datoms-for-pull (:schema db)))
+                                  nil)))
+             #{}
+             pulls-and-qs))))
 
 (defn process-req [conn req res]
   (let [headers {"Access-Control-Allow-Origin" "*"
                  "Access-Control-Request-Method" "*"
-                 "Access-Control-Allow-Methods" "OPTIONS, GET"
+                 "Access-Control-Allow-Methods" "OPTIONS, GET, POST"
                  "Access-Control-Allow-Headers" "*"}]
     (cond
       (and (= (.-url req) "/db")
@@ -86,14 +88,17 @@
                                                (datoms-for @conn))
                                res-content (-> {:datoms datoms-set}
                                                pr-str)]
-                           (.log js/console "Answering with " res-content)
                            (.writeHead res 200 (clj->js (merge headers
                                                                {"Content-Type" "application/edn"})))
                            (.write res res-content)
                            (.end res)))))
 
+      (= (.-method req) "OPTIONS")
+      (do (.writeHead res 200 (clj->js headers))
+          (.end res))
+
       :else
-      (do (.writeHead res 404 #js {})
+      (do (.writeHead res 404 (clj->js headers))
           (.end res)))))
 
 (defn -main [facts-db-address port schema-file default-provider-url]

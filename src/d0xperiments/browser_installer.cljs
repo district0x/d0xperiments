@@ -3,6 +3,7 @@
             [datascript.core :as d]
             [clojure.core.async :as async]
             [ajax.core :refer [ajax-request] :as ajax]
+            [ajax.edn :as ajax-edn]
             [d0xperiments.indexeddb :as idb])
   (:require-macros [d0xperiments.utils :refer [<?]]))
 
@@ -15,6 +16,25 @@
 
 (defn fact->ds-fact [{:keys [entity attribute value]}]
   [:db/add entity attribute value])
+
+(defn pre-fetch [ds-conn url pulls-and-qs]
+  (let [out-ch (async/chan)]
+   (ajax-request {:method          :post
+                  :uri             (str url "/datoms")
+                  :timeout         30000
+                  :params {:datoms-for pulls-and-qs}
+                  :format (ajax-edn/edn-request-format)
+                  :response-format (ajax/raw-response-format)
+                  :handler (fn [[ok? res] result]
+                             (if ok?
+                               (let [datoms (->> (cljs.reader/read-string res)
+                                                 :datoms
+                                                 (mapv (fn [[e a v]]
+                                                         [:db/add e a v])))]
+                                 (d/transact! ds-conn datoms)
+                                 (async/put! out-ch true))
+                               (async/put! out-ch (js/Error. "Error pre fetching datoms" res))))})
+   out-ch))
 
 (defn load-db-snapshot [url]
   (let [out-ch (async/chan)]
@@ -29,14 +49,19 @@
                                 (async/close! out-ch)))})
     out-ch))
 
-(defn install [{:keys [progress-cb provider-url preindexer-url facts-db-address ds-schema]}]
+(defn install [{:keys [progress-cb provider-url preindexer-url facts-db-address ds-conn pre-fetch-datoms]}]
+
   (async/go
     (try
+
       (let [stop-watch-start (.getTime (js/Date.))
-            last-block-so-far (atom 0)
-            db-conn (atom nil)]
+            last-block-so-far (atom 0)]
         (<? (wait-for-load))
         (println "Page loaded")
+
+        (when pre-fetch-datoms
+          (println "Pre fetching datoms")
+          (<? (pre-fetch ds-conn preindexer-url pre-fetch-datoms)))
 
         (set! js/web3js (js/Web3. (or (.-givenProvider js/web3) provider-url)))
 
@@ -53,23 +78,22 @@
           (if (pos? idb-facts-count)
             (let [last-stored-bn (<? (idb/last-stored-block-number))
                   idb-facts (->> (<? (idb/every-store-fact-ch))
-                                 (mapv fact->ds-fact))
-                  ds-db-conn (d/create-conn ds-schema)]
+                                 (mapv fact->ds-fact))]
               (println "We have facts on IndexedDB. Last stored block number is " last-stored-bn)
               (reset! last-block-so-far last-stored-bn)
-              (d/transact! ds-db-conn idb-facts)
-              (reset! db-conn ds-db-conn)
-              (progress-cb {:state :datascript-db-ready :db-conn ds-db-conn}))
+              (d/transact! ds-conn idb-facts)
+              (progress-cb {:state :datascript-db-ready}))
 
             ;; NO IndexDB facts, try to load a snapshot
             (let [_ (println "We DON'T have IndexedDB facts, lets try to load a snapshot")
                   {:keys [db last-seen-block]} (<? (load-db-snapshot preindexer-url))]
               (if db
-                (let [dbc (d/conn-from-db db)]
+                (let []
                   (reset! last-block-so-far last-seen-block)
                   (println "we have a snapshot, installing it")
-                  (progress-cb {:state :datascript-db-ready :db-conn dbc})
-                  (reset! db-conn dbc)
+                  (d/transact! ds-conn (->> (d/datoms db :eavt)
+                                            (mapv (fn [{:keys [e a v]}] [:db/add e a v]))))
+                  (progress-cb {:state :datascript-db-ready})
                   (idb/store-facts (->> (d/datoms db :eavt)
                                         (map (fn [{:keys [e a v block-num]}]
                                                {:entity e :attribute a :value v :block-num block-num})))))
@@ -79,16 +103,14 @@
           ;; we already or got facts from IndexedDB or downloaded a snapshot, or we don't have anything
           ;; in any case sync the remainning from blockchain
           (println "Let's sync the remainning facts directly from the blockchain. Last block seen " @last-block-so-far)
-          (when-not @db-conn (reset! db-conn (d/create-conn ds-schema)))
-
           (progress-cb {:state :downloading-facts})
 
           (let [past-facts (<? (get-past-events js/web3js facts-db-address @last-block-so-far))]
             (progress-cb {:state :installing-facts})
-            (d/transact! @db-conn (mapv fact->ds-fact past-facts))
+            (d/transact! ds-conn (mapv fact->ds-fact past-facts))
             (idb/store-facts past-facts)))
 
-        (progress-cb {:state :datascript-db-ready :db-conn @db-conn})
+        (progress-cb {:state :datascript-db-ready})
 
         (println "New facts listener installed")
         (progress-cb {:state :ready :startup-time-in-millis (- (.getTime (js/Date.)) stop-watch-start)})
@@ -97,6 +119,6 @@
         ;; keep listening to new facts and transacting them to datascript db
         (let [new-facts-ch (install-facts-filter! js/web3js facts-db-address)]
           (loop [nf (<? new-facts-ch)]
-            (d/transact! @db-conn [(fact->ds-fact nf)])
+            (d/transact! ds-conn [(fact->ds-fact nf)])
             (recur (<? new-facts-ch)))))
       (catch js/Error e (.log js/console e)))))
