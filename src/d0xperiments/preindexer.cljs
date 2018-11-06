@@ -3,7 +3,9 @@
             [bignumber.core :as bn]
             [cljs.nodejs :as nodejs]
             [d0xperiments.core :refer [install-facts-filter! get-past-events]]
-            [clojure.core.async :as async])
+            [clojure.core.async :as async]
+            [posh.lib.pull-analyze :as posh-pull]
+            [posh.lib.q-analyze :as posh-q])
   (:require-macros [d0xperiments.utils :refer [<?]]))
 
 (nodejs/enable-util-print!)
@@ -38,6 +40,62 @@
 
 ;; TODO add tools.cli
 
+
+(defn datoms-for [db pulls-and-qs]
+  (reduce (fn [datoms-set {:keys [type] :as x}]
+            (into datoms-set (case type
+                               :query (-> (posh-q/q-analyze {:q d/q} [:datoms]
+                                                            (:query x)
+                                                            (into [db] (:vars x)))
+                                          :datoms first second)
+                               :pull (->> (posh-pull/pull-affected-datoms d/pull db (:pattern x) (first (:ids x)))
+                                          (posh-pull/generate-affected-tx-datoms-for-pull (:schema db)))
+                               nil)))
+   #{}
+   pulls-and-qs))
+
+(defn process-req [conn req res]
+  (let [headers {"Access-Control-Allow-Origin" "*"
+                 "Access-Control-Request-Method" "*"
+                 "Access-Control-Allow-Methods" "OPTIONS, GET"
+                 "Access-Control-Allow-Headers" "*"}]
+    (cond
+      (and (= (.-url req) "/db")
+           (= (.-method req) "GET"))
+      (let [res-map {:db @conn
+                     :last-seen-block @last-seen-block}
+            res-content (zlib.gzipSync (Buffer.from (prn-str res-map)))]
+        (.log js/console "Content got gziped to " (.-length res-content))
+        (.writeHead res 200 (clj->js (merge headers
+                                            {"Content-Type" "application/edn"
+                                             "Content-Encoding" "gzip"})))
+        (.write res res-content)
+        (.end res))
+
+
+      (and
+       (= (.-url req) "/datoms")
+       (= (.-method req) "POST"))
+      (let [req-content (atom "")]
+        (.on req "data" (fn [chunk] (swap! req-content str chunk)))
+        (.on req "end" (fn []
+                         (.log js/console "Asked to resolve datoms for" @req-content)
+                         (let [datoms-set (->> @req-content
+                                               cljs.reader/read-string
+                                               :datoms-for
+                                               (datoms-for @conn))
+                               res-content (-> {:datoms datoms-set}
+                                               pr-str)]
+                           (.log js/console "Answering with " res-content)
+                           (.writeHead res 200 (clj->js (merge headers
+                                                               {"Content-Type" "application/edn"})))
+                           (.write res res-content)
+                           (.end res)))))
+
+      :else
+      (do (.writeHead res 404 #js {})
+          (.end res)))))
+
 (defn -main [facts-db-address port schema-file default-provider-url]
   (let [schema (load-schema schema-file)
         conn-obj (d/create-conn schema)
@@ -45,9 +103,6 @@
         http-provider (new (-> w3 .-providers .-HttpProvider) (str "http://" default-provider-url))
         web3-http  (new w3 http-provider)
         web3-ws (new w3 ws-provider)]
-
-    ;; (reset! web3 web3-obj) ;; for repl
-    ;; (reset! conn conn-obj)
 
     (async/go
       (println "Downloading past events, please wait...")
@@ -64,20 +119,7 @@
           (transact-fact conn-obj nf)
           (recur (<? new-facts-ch)))))
 
-    (doto (.createServer http
-                         (fn [req res]
-                           (let [res-map {:db @conn-obj
-                                          :last-seen-block @last-seen-block}
-                                 res-content (zlib.gzipSync (Buffer.from (prn-str res-map)))]
-                             (.log js/console "Content got gziped to " (.-length res-content))
-                             (.writeHead res 200 #js {"Content-Type" "application/edn"
-                                                      "Content-Encoding" "gzip"
-                                                      "Access-Control-Allow-Origin" "*"
-                                                      "Access-Control-Request-Method" "*"
-                                                      "Access-Control-Allow-Methods" "OPTIONS, GET"
-                                                      "Access-Control-Allow-Headers" "*"})
-                             (.write res res-content)
-                             (.end res))))
+    (doto (.createServer http (partial process-req conn-obj))
       (.listen port))))
 
 
@@ -97,5 +139,36 @@
   (d/pull-many @conn '[*]
                (map first
                     (d/q '[:find ?e :where [?e :person/name]] @conn)))
+
+
+  (do
+    (defonce c (d/create-conn))
+    (d/transact! c [[:db/add 1 :person/name "Rich"]
+                    [:db/add 1 :person/age 45]
+                    [:db/add 2 :person/name "Alex"]
+                    [:db/add 2 :person/age 44]
+                    [:db/add 4 :person/name "Other"]
+                    [:db/add 4 :person/age 100]]))
+  (= (datoms-for @c
+                 [{:type :query
+                   :query '[:find ?eid ?n
+                            :in $ ?age
+                            :where
+                            [?eid :person/name ?n]
+                            [?eid :person/age ?age]]
+                   :vars [45]}
+                  {:type :pull
+                   :pattern '[*]
+                   :ids [4]}
+                  {:type :pull
+                   :pattern '[:db/id :person/name]
+                   :ids [2]}])
+     #{[1 :person/name "Rich"]
+       [1 :person/age 45]
+       [2 :person/name "Alex"]
+       [4 :person/age 100]
+       [4 :person/name "Other"]})
+
+
 
   )

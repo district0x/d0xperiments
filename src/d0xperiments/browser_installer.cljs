@@ -19,7 +19,7 @@
 (defn load-db-snapshot [url]
   (let [out-ch (async/chan)]
     (ajax-request {:method          :get
-                   :uri             url
+                   :uri             (str url "/db")
                    :timeout         30000
                    :response-format (ajax/raw-response-format)
                    :handler (fn [[ok? res] result]

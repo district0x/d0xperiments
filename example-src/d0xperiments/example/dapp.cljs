@@ -185,8 +185,8 @@
 
 (defn ^:export init []
   (mount-root)
-  (installer/install {:provider-url #_"ws://localhost:8549/" "ws://192.168.1.8:8549/"
-                      :preindexer-url #_"http://localhost:1234" "http://192.168.1.8:1234"
+  (installer/install {:provider-url "ws://localhost:8549/"
+                      :preindexer-url "http://localhost:1234"
                       :facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05"
                       :progress-cb (fn [{:keys [state] :as progress}]
                                      (when (= state :datascript-db-ready)
