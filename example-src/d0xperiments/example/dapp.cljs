@@ -40,10 +40,21 @@
                                               (map first)
                                               (take 20)))})))
 
+
+(defn log-stats [db]
+  (println (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first)))
+  (println (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first)))
+  (println (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first)))
+  (println (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first)))
+  (println (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first)))
+  (println (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first)))
+  (println (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))))
+
 (re-frame/reg-event-db
  :app-state-change
- (fn [db [_ state]]
-   (assoc db :app-state state)))
+ (fn [db [_ {:keys [state] :as prog}]]
+   (when (= :ready state) (log-stats db))
+   (assoc db :app-state prog)))
 
 ;;;;;;;;;;;;;;;;;;;
 ;; FXs and COFXs ;;
@@ -93,13 +104,7 @@
    [:div "HUD"]
    [:ul
     [:li (str "Started in: " startup-time-in-millis " millis") ]
-    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
-    [:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
-    [:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
-    [:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
-    [:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
-    [:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
-    [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]])
+    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]]])
 
 
 (defn meme [id]
