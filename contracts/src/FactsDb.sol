@@ -4,7 +4,7 @@ contract FactsDb {
   event Fact(uint entity, string attribute, string val,  bool add);
   event Fact(uint entity, string attribute, uint val,    bool add);
   event Fact(uint entity, string attribute, address val, bool add);
-  event Fact(uint entity, string attribute, bytes val, bool add);
+  event Fact(uint entity, string attribute, bytes val,   bool add);
   event Fact(uint entity, string attribute, bytes32 val, bool add);
 
 

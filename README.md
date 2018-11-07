@@ -8,6 +8,10 @@ Some experimets around possible d0x architecture
 
 ## Snapshots / Preindexer
 
+```bash
+clj -Sdeps "{:deps {district0x/d0xperiments {:git/url \"https://github.com/district0x/d0xperiments\" :sha \"\"}}}" -A:build-preindexer
+```
+
 ## Creating a DApp
 
 ## Dev workflows
