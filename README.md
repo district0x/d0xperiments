@@ -9,7 +9,16 @@ Some experimets around possible d0x architecture
 ## Snapshots / Preindexer
 
 ```bash
-clj -Sdeps "{:deps {district0x/d0xperiments {:git/url \"https://github.com/district0x/d0xperiments\" :sha \"\"}}}" -A:build-preindexer
+# Build preindexer.js
+
+clj -A:build-preindexer
+
+# Run a instance
+
+node preindexer.js --address 0x360b6d00457775267aa3e3ef695583c675318c05      \
+                   --port 1234                                               \
+                   --schema ./example-src/d0xperiments/example/db_schema.edn \
+                   --rpc localhost:8549
 ```
 
 ## Creating a DApp

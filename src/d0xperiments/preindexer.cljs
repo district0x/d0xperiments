@@ -5,7 +5,8 @@
             [d0xperiments.core :refer [install-facts-filter! get-past-events]]
             [clojure.core.async :as async]
             [posh.lib.pull-analyze :as posh-pull]
-            [posh.lib.q-analyze :as posh-q])
+            [posh.lib.q-analyze :as posh-q]
+            [clojure.tools.cli :refer [parse-opts]])
   (:require-macros [d0xperiments.utils :refer [<?]]))
 
 (nodejs/enable-util-print!)
@@ -101,31 +102,56 @@
       (do (.writeHead res 404 (clj->js headers))
           (.end res)))))
 
-(defn -main [facts-db-address port schema-file default-provider-url]
-  (let [schema (load-schema schema-file)
-        conn-obj (d/create-conn schema)
-        ws-provider (new (-> w3 .-providers .-WebsocketProvider) (str "ws://" default-provider-url))
-        http-provider (new (-> w3 .-providers .-HttpProvider) (str "http://" default-provider-url))
-        web3-http  (new w3 http-provider)
-        web3-ws (new w3 ws-provider)]
+(def cli-options
+  [["-a" "--address ADDRESS" "FactsDB contract address"]
+   ["-p" "--port PORT" "HTTP server listening port"
+    :default 1234
+    :parse-fn #(js/parseInt %)
+    :validate [#(< 0 % 0x10000) "Must be a number between 0 and 65536"]]
+   ["-s" "--schema FILE" "Datascript schema file"
+    :default nil]
+   ["-r" "--rpc HOST" "Ethereum RPC endpoint"
+    :default "localhost:8545"]])
 
-    (async/go
-      (println "Downloading past events, please wait...")
-      (let [past-events (<? (get-past-events web3-http facts-db-address 0))
-            new-facts-ch (install-facts-filter! web3-ws facts-db-address)]
-        (println "Past events downloaded, replaying...")
-        ;; transact past facts
-        (doseq [f past-events]
-          (transact-fact conn-obj f))
+(defn -main [& args]
+  (let [{:keys [options errors] :as result} (parse-opts args cli-options)]
+    (when errors
+      (doseq [e errors]
+        (println e))
+      (println (:summary result))
+      (.exit js/process 1))
 
-        (println "Old events replayed. Watching for more events...")
-        ;; keep forever transacting new facts
-        (loop [nf (<? new-facts-ch)]
-          (transact-fact conn-obj nf)
-          (recur (<? new-facts-ch)))))
+    (when (or (:help options)
+              (not (:address options)))
+      (println "Usage :  preindexer [options]")
+      (println "Options: ")
+      (println (:summary result))
+      (.exit js/process 1))
 
-    (doto (.createServer http (partial process-req conn-obj))
-      (.listen port))))
+    (let [schema (load-schema (:schema options))
+          conn-obj (d/create-conn schema)
+          ws-provider (new (-> w3 .-providers .-WebsocketProvider) (str "ws://" (:rpc options)))
+          http-provider (new (-> w3 .-providers .-HttpProvider) (str "http://" (:rpc options)))
+          web3-http  (new w3 http-provider)
+          web3-ws (new w3 ws-provider)]
+
+      (async/go
+        (println "Downloading past events, please wait...")
+        (let [past-events (<? (get-past-events web3-http (:address options) 0))
+              new-facts-ch (install-facts-filter! web3-ws (:address options))]
+          (println "Past events downloaded, replaying...")
+          ;; transact past facts
+          (doseq [f past-events]
+            (transact-fact conn-obj f))
+
+          (println "Old events replayed. Watching for more events...")
+          ;; keep forever transacting new facts
+          (loop [nf (<? new-facts-ch)]
+            (transact-fact conn-obj nf)
+            (recur (<? new-facts-ch)))))
+
+      (doto (.createServer http (partial process-req conn-obj))
+        (.listen (:port options))))))
 
 
 (set! *main-cli-fn* -main)
