@@ -89,20 +89,26 @@
 ;;;;;;;;
 
 (defn hud [startup-time-in-millis]
-  [:ul
-   [:li (str "Started in: " startup-time-in-millis " millis") ]
-   [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
-   [:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
-   [:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
-   [:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
-   [:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
-   [:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
-   [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]])
+  [:div {:style {:color :red}}
+   [:div "HUD"]
+   [:ul
+    [:li (str "Started in: " startup-time-in-millis " millis") ]
+    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]
+    [:li (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first))]
+    [:li (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first))]
+    [:li (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first))]
+    [:li (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first))]
+    [:li (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first))]
+    [:li (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))]]])
 
 
-(defn search-item [id]
+(defn meme [id]
   (let [m @(re-frame/subscribe [::meme id])]
-    [:li (str m)]))
+    (when (:reg-entry/address m)
+      [:ul {:style {:border "1px solid blue" :margin-bottom 2}}
+       (for [[k v] m]
+             ^{:key k}
+             [:li (str (name k) " : " v)])])))
 
 (defn meme-factory-search []
   (let [search-val (reagent/atom "")
@@ -118,19 +124,17 @@
        [:ul
         (for [m @result]
           ^{:key m}
-          [search-item m])]])))
+          [meme m])]])))
 
 (def example-meme-id 1.3254459306746723e+48)
 
 (defn main []
   (let [app-state @(re-frame/subscribe [::app-state])]
     [:div
-     [:div {:style {:color :red}}
-      [hud (:startup-time-in-millis app-state)]
+     [hud (:startup-time-in-millis app-state)]
+     [:div {:style {:color :green}}
       [:h3 "Example meme"]
-      [:ul (for [[k v] @(re-frame/subscribe [::meme example-meme-id])]
-             ^{:key k}
-             [:li (str (name k) " : " v)])]]
+      [meme example-meme-id]]
      (case (:state app-state)
        :downloading-facts   [:div "Downloading app data, please wait..."]
        :installing-facts    [:div "Installing app"]
@@ -155,18 +159,6 @@
 ;; {:satate :installing-facts}
 ;; {:satate :datascript-db-ready :db-conn conn}
 ;; {:satate :ready}
-
-;; for 9000 blocks / 61230 facts
-
-;; DESKTOP
-;; 26 sec full install
-;; 4,8 sec snapshot download + install (~800Kb)
-;; 3,6 sec from IndexedDB
-
-;; MOBILE
-;;  sec full install
-;; 14,7 sec snapshot download + install (~800Kb)
-;;  sec from IndexedDB
 
 
 (defn install-datascript-db! [conn]
