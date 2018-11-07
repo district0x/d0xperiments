@@ -82,7 +82,7 @@ When it runs it starts the same syncer process started by the ui installer, it d
 in a datascript db.
 It then starts a HTTP server which exposes to endpoints /db and /datoms.
 
-A GET to /db endpoint will response with a edn serialized, gzip compressed version of the current db state.
+A GET to /db endpoint will respond with a edn serialized, gzip compressed version of the current db state.
 
 A POST to /datoms will request the datoms needed in order to fullfill a collection of pulls and datalog queries.
 
