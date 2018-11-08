@@ -53,7 +53,7 @@
 (re-frame/reg-event-db
  :app-state-change
  (fn [db [_ {:keys [state] :as prog}]]
-   (when (= :ready state) (log-stats db))
+   ;;(when (= :ready state) (log-stats db))
    (assoc db :app-state prog)))
 
 ;;;;;;;;;;;;;;;;;;;
@@ -104,7 +104,7 @@
    [:div "HUD"]
    [:ul
     [:li (str "Started in: " startup-time-in-millis " millis") ]
-    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]]])
+    #_[:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]]])
 
 
 (defn meme [id]
@@ -140,12 +140,13 @@
      [:div {:style {:color :green}}
       [:h3 "Example meme"]
       [meme example-meme-id]]
+
      (case (:state app-state)
        :downloading-facts   [:div "Downloading app data, please wait..."]
-       :installing-facts    [:div "Installing app"]
-       :datascript-db-ready [:div "Db ready"]
-       :ready [meme-factory-search]
-       [:div])]))
+       :installing-facts    [:div (gstring/format "Installing app (%d%%)" (:percentage app-state))]
+       [:div])
+
+     [meme-factory-search]]))
 
 
  ;;;;;;;;;;
@@ -160,10 +161,9 @@
 
 
 ;; progress-states
-;; {:satate :downloading-facts}
-;; {:satate :installing-facts}
-;; {:satate :datascript-db-ready :db-conn conn}
-;; {:satate :ready}
+;; {:state :downloading-facts}
+;; {:state :installing-facts :percentage 50}
+;; {:state :ready}
 
 
 (defn install-datascript-db! [conn]
@@ -181,9 +181,10 @@
                         :progress-cb (fn [{:keys [state] :as progress}]
                                        (re-frame/dispatch [:app-state-change progress]))
                         :ds-conn dc
+                        :transact-batch-size 2000
 
-                        ;; :pre-fetch-datoms [{:type    :pull
-                        ;;                     :pattern '[*]
-                        ;;                     :ids      [example-meme-id]}]
+                        :pre-fetch-datoms [{:type    :pull
+                                            :pattern '[*]
+                                            :ids      [example-meme-id]}]
 
                         })))
