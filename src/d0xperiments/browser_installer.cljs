@@ -14,8 +14,8 @@
     (.addEventListener js/window "load" #(async/put! out-ch true))
     out-ch))
 
-(defn fact->ds-fact [{:keys [entity attribute value]}]
-  [:db/add entity attribute value])
+(defn fact->ds-fact [{:keys [entity attribute value add]}]
+  [(if add :db/add :db/retract) entity attribute value])
 
 (defn transact-facts-batch [finish-ch ds-conn transact-batch-size progress-cb facts-to-transact total-facts so-far]
   (if (empty? facts-to-transact)
@@ -122,7 +122,7 @@
                                                       ;; TODO Hack, storing last-seen-block as block number because
                                                       ;; not transfering it in snapshot, works since we are only using
                                                       ;; block number for last seen block reference
-                                                      {:entity e :attribute a :value v :block-num last-seen-block}))
+                                                      {:entity e :attribute a :value v :block-num last-seen-block :add x}))
                                                (into fs )))))
 
                 (println "We couldn't download a snapshot"))))

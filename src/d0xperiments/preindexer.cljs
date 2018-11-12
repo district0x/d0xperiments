@@ -43,19 +43,18 @@
 
 
 (def datoms-for
-  (memoize
-   (fn[db pulls-and-qs]
-     (reduce (fn [datoms-set {:keys [type] :as x}]
-               (into datoms-set (case type
-                                  :query (-> (posh-q/q-analyze {:q d/q} [:datoms]
-                                                               (:query x)
-                                                               (into [db] (:vars x)))
-                                             :datoms first second)
-                                  :pull (->> (posh-pull/pull-affected-datoms d/pull db (:pattern x) (first (:ids x)))
-                                             (posh-pull/generate-affected-tx-datoms-for-pull (:schema db)))
-                                  nil)))
-             #{}
-             pulls-and-qs))))
+  (fn [db pulls-and-qs]
+    (reduce (fn [datoms-set {:keys [type] :as x}]
+              (into datoms-set (case type
+                                 :query (-> (posh-q/q-analyze {:q d/q} [:datoms]
+                                                              (:query x)
+                                                              (into [db] (:vars x)))
+                                            :datoms first second)
+                                 :pull (->> (posh-pull/pull-affected-datoms d/pull db (:pattern x) (first (:ids x)))
+                                            (posh-pull/generate-affected-tx-datoms-for-pull (:schema db)))
+                                 nil)))
+            #{}
+            pulls-and-qs)))
 
 (defn process-req [conn req res]
   (let [headers {"Access-Control-Allow-Origin" "*"
