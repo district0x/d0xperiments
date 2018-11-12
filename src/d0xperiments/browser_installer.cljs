@@ -56,26 +56,44 @@
                                  (async/close! out-ch))))})
    out-ch))
 
+(defonce worker (js/Worker. "worker.js"))
+(defonce worker-responses-handlers (atom {}))
+
+(set! (.-onmessage worker)
+      (fn [e]
+        (.log js/console "Received from worker " (.-data e))
+        (let [ev-data (.-data e)
+              handle (get @worker-responses-handlers (.-id ev-data))
+              result (.-result ev-data)]
+          (swap! worker-responses-handlers dissoc (.-id ev-data))
+          (handle result))))
+
+(defn call-worker [fn-name args callback]
+  (let [id (str (random-uuid))]
+    (swap! worker-responses-handlers assoc id callback)
+    (.postMessage worker
+                  (clj->js {:id id
+                            :fn fn-name
+                            :args args}))))
+
+
 (defn load-db-snapshot [url]
   (println "Downloading snapshot")
   (let [out-ch (async/chan)]
-    (ajax-request {:method          :get
-                   :uri             (str url "/db")
-                   :timeout         30000
-                   :response-format (ajax/raw-response-format)
-                   :handler (fn [[ok? res] result]
-                              (if ok?
-                                ;; TODO move read-string to worker since blocks for long time
-                                (let [res-map (cljs.reader/read-string res)]
-                                  (async/put! out-ch res-map))
-                                (async/close! out-ch)))})
+    (call-worker :download-snapshot
+                 [url]
+                 (fn [result]
+                   (let [val {:db-facts (->> (aget result "db-facts")
+                                             (mapv (fn [[e a v x]]
+                                                     [e (keyword a) v x])))
+                              :last-seen-block (aget result "last-seen-block")}]
+                     (async/put! out-ch val))))
     out-ch))
 
-(defn install [{:keys [progress-cb provider-url preindexer-url facts-db-address ds-conn pre-fetch-datoms transact-batch-size]}]
 
+(defn install [{:keys [progress-cb provider-url preindexer-url facts-db-address ds-conn pre-fetch-datoms transact-batch-size]}]
   (async/go
     (try
-
       (let [stop-watch-start (.getTime (js/Date.))
             last-block-so-far (atom 0)
             facts-to-transact (atom #{})
@@ -107,7 +125,7 @@
 
             ;; NO IndexDB facts, try to load a snapshot
             (let [_ (println "We DON'T have IndexedDB facts, lets try to load a snapshot")
-                  {:keys [db-facts last-seen-block]} (<? (load-db-snapshot preindexer-url))]
+                  {:keys [db-facts last-seen-block] :as v} (<? (load-db-snapshot preindexer-url))]
               (if (not-empty db-facts)
                 (let []
                   (reset! last-block-so-far last-seen-block)
