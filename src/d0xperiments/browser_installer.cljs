@@ -57,6 +57,7 @@
    out-ch))
 
 (defn load-db-snapshot [url]
+  (println "Downloading snapshot")
   (let [out-ch (async/chan)]
     (ajax-request {:method          :get
                    :uri             (str url "/db")
@@ -64,6 +65,7 @@
                    :response-format (ajax/raw-response-format)
                    :handler (fn [[ok? res] result]
                               (if ok?
+                                ;; TODO move read-string to worker since blocks for long time
                                 (let [res-map (cljs.reader/read-string res)]
                                   (async/put! out-ch res-map))
                                 (async/close! out-ch)))})
@@ -105,19 +107,22 @@
 
             ;; NO IndexDB facts, try to load a snapshot
             (let [_ (println "We DON'T have IndexedDB facts, lets try to load a snapshot")
-                  {:keys [db last-seen-block]} (<? (load-db-snapshot preindexer-url))]
-              (if db
+                  {:keys [db-facts last-seen-block]} (<? (load-db-snapshot preindexer-url))]
+              (if (not-empty db-facts)
                 (let []
                   (reset! last-block-so-far last-seen-block)
                   (println "we have a snapshot, installing it")
-                  (swap! facts-to-transact (fn [fs] (->> (d/datoms db :eavt)
-                                                         (mapv (fn [{:keys [e a v]}] [:db/add e a v]))
-                                                         (into fs)) ))
+                  (swap! facts-to-transact (fn [fs] (->> db-facts
+                                                         (mapv (fn [[e a v x]] [(if x :db/add :db/retract) e a v]))
+                                                         (into fs))))
 
                   (swap! facts-to-store (fn [fs]
-                                          (->> (d/datoms db :eavt)
-                                               (map (fn [{:keys [e a v block-num]}]
-                                                      {:entity e :attribute a :value v :block-num block-num}))
+                                          (->> db-facts
+                                               (map (fn [[e a v x]]
+                                                      ;; TODO Hack, storing last-seen-block as block number because
+                                                      ;; not transfering it in snapshot, works since we are only using
+                                                      ;; block number for last seen block reference
+                                                      {:entity e :attribute a :value v :block-num last-seen-block}))
                                                (into fs )))))
 
                 (println "We couldn't download a snapshot"))))
@@ -131,7 +136,6 @@
                                                    (into fs))))
             (swap! facts-to-store (fn [fs] (into fs past-facts)))))
 
-        (println "Transacting facts")
         (if transact-batch-size
           (do
             (when (< transact-batch-size 32) (throw (js/Error. "transact-batch-size should be nil or >= 32")))

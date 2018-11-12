@@ -30,7 +30,7 @@
    {}))
 
 (defn transact-fact [conn {:keys [entity attribute value block-num] :as fact}]
-  (.log js/console (str "[" :db/add " " entity " " attribute " " value "]"))
+  ;; (.log js/console (str "[" :db/add " " entity " " attribute " " value "]"))
   (swap! last-seen-block (partial (fnil max 0) block-num))
   (d/transact! conn [[:db/add
                       entity
@@ -65,7 +65,8 @@
     (cond
       (and (= (.-url req) "/db")
            (= (.-method req) "GET"))
-      (let [res-map {:db @conn
+      (let [res-map {:db-facts (->> (d/datoms @conn :eavt)
+                                    (mapv (fn [[e a v _ x]] [e a v x])))
                      :last-seen-block @last-seen-block}
             res-content (zlib.gzipSync (Buffer.from (prn-str res-map)))]
         (.log js/console "Content got gziped to " (.-length res-content))
@@ -139,7 +140,7 @@
         (println "Downloading past events, please wait...")
         (let [past-events (<? (get-past-events web3-http (:address options) 0))
               new-facts-ch (install-facts-filter! web3-ws (:address options))]
-          (println "Past events downloaded, replaying...")
+          (println "Past events downloaded, replaying " (count past-events) " facts...")
           ;; transact past facts
           (doseq [f past-events]
             (transact-fact conn-obj f))
