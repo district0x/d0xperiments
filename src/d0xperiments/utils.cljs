@@ -18,6 +18,10 @@
    []
    facts))
 
+;;;;;;;;;;;;;;;;;;;;;;;
+;; Web3js 0.20 utils ;;
+;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn- build-fact-web3-js-0 [ev]
   {:entity    (bn/number (-> ev .-args .-entity))
    :attribute (keyword (-> ev .-args .-attribute))
@@ -70,6 +74,10 @@
 (defn make-web3js-0-facts-emitter [web3-obj]
   (->Web3js0FactsEmitter web3-obj))
 
+;;;;;;;;;;;;;;;;;;;;;;;
+;; Web3js 1.0  utils ;;
+;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn- build-fact-web3-js-1 [ev]
   {:entity    (bn/number (-> ev .-returnValues .-entity))
    :attribute (keyword (-> ev .-returnValues .-attribute))
@@ -107,3 +115,55 @@
 
 (defn make-web3js-1-facts-emitter [web3-obj]
   (->Web3js1FactsEmitter web3-obj))
+
+
+;;;;;;;;;;;;;;;;;;;;
+;; Ether.js utils ;;
+;;;;;;;;;;;;;;;;;;;;
+
+(defn- build-fact-ether-js [ev]
+  {:entity    (-> ev .-args .-entity (.maskn 53) .toNumber)
+   :attribute (keyword (-> ev .-args .-attribute))
+   :value     (if (= (aget (-> ev .-args .-val) "_ethersType") "BigNumber")
+                (-> ev .-args .-val (.maskn 53) .toNumber)
+                (-> ev .-args .-val))
+   :add       (boolean (-> ev .-args .-add))
+   :block-num (-> ev .-blockNumber)})
+
+(defrecord EtherJsFactsEmitter [web3-obj]
+
+  core/Web3FactsEmitter
+
+  (last-block-number [emitter callback]
+    (.then (.getBlockNumber web3-obj) #(callback nil %)))
+
+  (all-past-facts [emitter contract-address from-block callback]
+    (let [facts-db-contract (new js/ethers.Contract contract-address core/facts-db-abi web3-obj)
+          all-facts (atom [])
+          finished? (atom false)]
+      (.then (.getBlockNumber web3-obj)
+             (fn [lb]
+               (println "Downloading events, from block " from-block " to " lb)
+               (.resetEventsBlock web3-obj from-block)
+               ;; asumes blocks come in order
+               (.on facts-db-contract "*"
+                    (fn [ev]
+                      (if (< (.-blockNumber ev) lb)
+                        (swap! all-facts conj (build-fact-ether-js ev))
+
+                        ;; TODO: missing all the events from last block
+                        (when-not @finished?
+                          (reset! finished? true)
+                          (println "Events downloaded" @finished?)
+                          (.removeAllListeners facts-db-contract "*")
+                          (swap! all-facts conj (build-fact-ether-js ev))
+                          (callback nil @all-facts)))))))))
+
+  (listen-new-facts [emitter contract-address callback]
+    (let [facts-db-contract (new js/ethers.Contract contract-address core/facts-db-abi web3-obj)]
+      (.on facts-db-contract  "*"
+           (fn [ev]
+             (callback nil (build-fact-ether-js ev)))))))
+
+(defn make-ether-js-emitter [web3-obj]
+  (->EtherJsFactsEmitter web3-obj))

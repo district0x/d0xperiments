@@ -9,7 +9,8 @@
             [goog.string :as gstring]
             [d0xperiments.browser-installer :as installer]
             [d0xperiments.utils :refer [make-web3js-0-facts-emitter
-                                        make-web3js-1-facts-emitter]])
+                                        make-web3js-1-facts-emitter
+                                        make-ether-js-emitter]])
   (:require-macros [d0xperiments.utils :refer [slurpf]]))
 
 ;; TODO Add chema here!!!
@@ -173,8 +174,8 @@
 (defn ^:export init []
   (let [dc (d/create-conn datascript-schema)
         ;; For web3js 1.0
-        web3-obj (js/Web3. (or (.-givenProvider js/web3) "ws://localhost:8549/"))
-        facts-emitter (make-web3js-1-facts-emitter web3-obj)
+        ;; web3-obj (js/Web3. (or (.-givenProvider js/web3) "ws://localhost:8549/"))
+        ;; facts-emitter (make-web3js-1-facts-emitter web3-obj)
 
         ;; For web3js 0.20
         ;; web3-obj (if js/web3
@@ -182,6 +183,9 @@
         ;;            (js/Web3. (new js/Web3.providers.HttpProvider "http://localhost:8549/")))
         ;; facts-emitter (make-web3js-0-facts-emitter web3-obj)
 
+        ;; For Ether.js
+        web3-obj (new js/ethers.providers.Web3Provider js/web3.currentProvider)
+        facts-emitter (make-ether-js-emitter web3-obj)
         ]
     (install-datascript-db! dc)
     (mount-root)
