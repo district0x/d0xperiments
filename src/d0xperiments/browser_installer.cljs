@@ -66,7 +66,8 @@
               handle (get @worker-responses-handlers (.-id ev-data))
               result (.-result ev-data)]
           (swap! worker-responses-handlers dissoc (.-id ev-data))
-          (handle result))))
+          (handle (not (.-error ev-data))
+                  result))))
 
 (defn call-worker [fn-name args callback]
   (let [id (str (random-uuid))]
@@ -82,12 +83,14 @@
   (let [out-ch (async/chan)]
     (call-worker :download-snapshot
                  [url]
-                 (fn [result]
-                   (let [val {:db-facts (->> (aget result "db-facts")
-                                             (mapv (fn [[e a v x]]
-                                                     [e (keyword a) v x])))
-                              :last-seen-block (aget result "last-seen-block")}]
-                     (async/put! out-ch val))))
+                 (fn [success result]
+                   (if success
+                     (let [val {:db-facts (->> (aget result "db-facts")
+                                               (mapv (fn [[e a v]]
+                                                       [e (keyword a) v true])))
+                                :last-seen-block (aget result "last-seen-block")}]
+                       (async/put! out-ch val))
+                     (async/close! out-ch))))
     out-ch))
 
 

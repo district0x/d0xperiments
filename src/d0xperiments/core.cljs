@@ -19,6 +19,7 @@
    :value     (if (bn/bignumber? (-> ev .-returnValues .-val))
                 (bn/number (-> ev .-returnValues .-val))
                 (-> ev .-returnValues .-val))
+   :add       (boolean (-> ev .-returnValues .-add))
    :block-num (bn/number (-> ev .-blockNumber))})
 
 (defn install-facts-filter!

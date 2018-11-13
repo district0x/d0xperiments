@@ -6,7 +6,9 @@
             [clojure.core.async :as async]
             [posh.lib.pull-analyze :as posh-pull]
             [posh.lib.q-analyze :as posh-q]
-            [clojure.tools.cli :refer [parse-opts]])
+            [clojure.tools.cli :refer [parse-opts]]
+            [d0xperiments.utils :refer [compress-facts]]
+            [clojure.pprint :as pprint])
   (:require-macros [d0xperiments.utils :refer [<?]]))
 
 (nodejs/enable-util-print!)
@@ -21,6 +23,7 @@
 (defonce conn (atom nil))
 
 (defonce last-seen-block (atom 0))
+(defonce attribute-stats (atom {}))
 
 (defn load-schema [file-path]
   (or
@@ -32,6 +35,7 @@
 (defn transact-fact [conn {:keys [entity attribute value block-num] :as fact}]
   ;; (.log js/console (str "[" :db/add " " entity " " attribute " " value "]"))
   (swap! last-seen-block (partial (fnil max 0) block-num))
+  (swap! attribute-stats (fn [s] (update s attribute inc)))
   (d/transact! conn [[:db/add
                       entity
                       attribute
@@ -55,6 +59,7 @@
                                  nil)))
             #{}
             pulls-and-qs)))
+
 
 (defn process-req [conn req res]
   (let [headers {"Access-Control-Allow-Origin" "*"
@@ -144,7 +149,9 @@
           (doseq [f past-events]
             (transact-fact conn-obj f))
 
-          (println "Old events replayed. Watching for more events...")
+          (println "Old events replayed. Attribute stats : ")
+          (pprint/pprint @attribute-stats)
+          (println "Ready. Watching for more events...")
           ;; keep forever transacting new facts
           (loop [nf (<? new-facts-ch)]
             (transact-fact conn-obj nf)

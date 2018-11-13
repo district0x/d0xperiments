@@ -9,6 +9,7 @@
  :meme/total-minted               {}
  :meme/token-id-start             {}
  :meme/token-id-end               {}
+ :meme/tag                        {:db/cardinality :db.cardinality/many}
  :challenge/reason                {}
  :challenge/challenger            {:db/valueType :db.type/ref}
  :challenge/commit-period-end     {}

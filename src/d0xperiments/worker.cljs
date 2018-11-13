@@ -1,6 +1,7 @@
 (ns d0xperiments.worker
   (:require [ajax.core :refer [ajax-request] :as ajax]
-            [ajax.edn :as ajax-edn]))
+            [ajax.edn :as ajax-edn]
+            [d0xperiments.utils :refer [uncompress-facts]]))
 
 (.log js/console "Worker created")
 
@@ -38,4 +39,6 @@
                                                              :keyword-fn #(if-let [ns (namespace %)]
                                                                             (str ns "/" (name %))
                                                                             (name %))))
-                              (.error js/console "Worker failed to execute " ev-data result)))))))
+                              (do (.error js/console "Worker process-message error " (clj->js [ev-data result]))
+                                  (.postMessage js/self #js {:error true
+                                                             :id (:id ev-data)}))))))))
