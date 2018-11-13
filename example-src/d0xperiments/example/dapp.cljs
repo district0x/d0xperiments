@@ -7,7 +7,8 @@
             [posh.reagent :as posh]
             [clojure.string :as str]
             [goog.string :as gstring]
-            [d0xperiments.browser-installer :as installer])
+            [d0xperiments.browser-installer :as installer]
+            [d0xperiments.utils :refer [make-web3js-1-facts-emitter]])
   (:require-macros [d0xperiments.utils :refer [slurpf]]))
 
 ;; TODO Add chema here!!!
@@ -104,7 +105,7 @@
    [:div "HUD"]
    [:ul
     [:li (str "Started in: " startup-time-in-millis " millis") ]
-    #_[:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]]])
+    [:li (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first))]]])
 
 
 (defn meme [id]
@@ -131,7 +132,7 @@
           ^{:key m}
           [meme m])]])))
 
-(def example-meme-id 1.3254459306746723e+48)
+(def example-meme-id 1.0566523466793907e+48)
 
 (defn main []
   (let [app-state @(re-frame/subscribe [::app-state])]
@@ -158,8 +159,6 @@
   (reagent/render [main]
                   (.getElementById js/document "app")))
 
-
-
 ;; progress-states
 ;; {:state :downloading-facts}
 ;; {:state :installing-facts :percentage 50}
@@ -171,13 +170,15 @@
   (re-posh/connect! conn))
 
 (defn ^:export init []
-  (let [dc (d/create-conn datascript-schema)]
+  (let [dc (d/create-conn datascript-schema)
+        web3-obj (js/Web3. (or (.-givenProvider js/web3) "ws://localhost:8549/"))
+        facts-emitter (make-web3js-1-facts-emitter web3-obj)]
     (install-datascript-db! dc)
     (mount-root)
 
-    (installer/install {:provider-url "ws://localhost:8549/"
+    (installer/install {:facts-emitter facts-emitter
                         :preindexer-url "http://localhost:1234"
-                        :facts-db-address "0x360b6d00457775267aa3e3ef695583c675318c05"
+                        :facts-db-address #_"0x360b6d00457775267aa3e3ef695583c675318c05" "0x1994a5281cc200e7516e02cac1e707eb6cfa388e"
                         :progress-cb (fn [{:keys [state] :as progress}]
                                        (re-frame/dispatch [:app-state-change progress]))
                         :ds-conn dc

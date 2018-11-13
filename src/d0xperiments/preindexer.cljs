@@ -8,7 +8,8 @@
             [posh.lib.q-analyze :as posh-q]
             [clojure.tools.cli :refer [parse-opts]]
             [d0xperiments.utils :refer [compress-facts]]
-            [clojure.pprint :as pprint])
+            [clojure.pprint :as pprint]
+            [d0xperiments.utils :refer [make-web3js-1-facts-emitter]])
   (:require-macros [d0xperiments.utils :refer [<?]]))
 
 (nodejs/enable-util-print!)
@@ -142,8 +143,8 @@
 
       (async/go
         (println "Downloading past events, please wait...")
-        (let [past-events (<? (get-past-events web3-http (:address options) 0))
-              new-facts-ch (install-facts-filter! web3-ws (:address options))]
+        (let [past-events (<? (get-past-events (make-web3js-1-facts-emitter web3-http) (:address options) 0))
+              new-facts-ch (install-facts-filter! (make-web3js-1-facts-emitter web3-ws) (:address options))]
           (println "Past events downloaded, replaying " (count past-events) " facts...")
           ;; transact past facts
           (doseq [f past-events]

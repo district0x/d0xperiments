@@ -3,14 +3,19 @@
             [clojure.core.async :as async])
   (:require-macros [d0xperiments.utils :refer [slurpf]]))
 
-
 (def facts-db-abi (-> (slurpf "./contracts/build/FactsDb.abi")
                       js/JSON.parse))
 
-(defn get-block-number []
+(defprotocol Web3FactsEmitter
+  (last-block-number [_ callback] "Returns last block number. Callback receives err, lbn")
+  (all-past-facts [_ contract-address from-block callback] "Calls callback with err, all-past-events")
+  (listen-new-facts [_ contract-address callback] "Calls callback with err, event for each new event"))
+
+
+(defn get-block-number [facts-emitter]
   (let [out-ch (async/chan)]
-    (.getBlockNumber js/web3.eth (fn [err last-block-num]
-                                   (async/put! out-ch last-block-num)))
+    (last-block-number facts-emitter (fn [err last-block-num]
+                                       (async/put! out-ch last-block-num)))
     out-ch))
 
 (defn- build-fact [ev]
@@ -23,27 +28,25 @@
    :block-num (bn/number (-> ev .-blockNumber))})
 
 (defn install-facts-filter!
-  [web3 facts-db-address]
-  (let [facts-db-contract (new js/web3.eth.Contract facts-db-abi facts-db-address)
-        out-ch (async/chan)]
-    (-> facts-db-contract
-        .-events
-        (.allEvents #js {}
-                    (fn [err ev]
-                      (if err
-                        (async/put! out-ch (js/Error. "Error in event watcher" err))
-                        (async/put! out-ch (-> ev
-                                               build-fact))))))
+  [facts-emitter facts-db-address]
+  (let [out-ch (async/chan)]
+    (listen-new-facts facts-emitter
+                      facts-db-address
+                      (fn [err ev]
+                        (if err
+                          (async/put! out-ch (js/Error. "Error in event watcher" err))
+                          (async/put! out-ch (-> ev
+                                                 build-fact)))))
+
     out-ch))
 
-(defn get-past-events [web3 facts-db-address from-block]
-  (let [facts-db-contract (new js/web3.eth.Contract facts-db-abi facts-db-address)
-        out-ch (async/chan)]
-    (-> facts-db-contract
-        (.getPastEvents "allEvents"
-                        #js {:fromBlock from-block}
-                        (fn [err evs]
-                          (if err
-                            (async/put! out-ch (js/Error. "Error replaying past events " err))
-                            (async/put! out-ch (->> evs (map build-fact)))))))
+(defn get-past-events [facts-emitter facts-db-address from-block]
+  (let [out-ch (async/chan)]
+    (all-past-facts facts-emitter
+                    facts-db-address
+                    from-block
+                    (fn [err evs]
+                      (if err
+                        (async/put! out-ch (js/Error. "Error replaying past events " err))
+                        (async/put! out-ch (->> evs (map build-fact))))))
     out-ch))
