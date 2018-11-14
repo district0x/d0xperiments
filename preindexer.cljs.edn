@@ -1,1 +1,1 @@
-{:npm-deps {:web3 "1.0.0-beta.36"} :install-deps true}
+{:npm-deps {:ethers "4.0.12"} :install-deps true}

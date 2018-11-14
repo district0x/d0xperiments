@@ -94,7 +94,7 @@
     out-ch))
 
 
-(defn install [{:keys [progress-cb facts-emitter preindexer-url facts-db-address ds-conn pre-fetch-datoms transact-batch-size]}]
+(defn install [{:keys [progress-cb web3 preindexer-url facts-db-address ds-conn pre-fetch-datoms transact-batch-size]}]
   (async/go
     (try
       (let [stop-watch-start (.getTime (js/Date.))
@@ -112,7 +112,7 @@
         (println "IndexedDB initialized")
 
         ;; First try from IndexedDB
-        (let [current-block-number (<? (get-block-number facts-emitter))
+        (let [current-block-number (<? (get-block-number web3))
               idb-facts-count (<? (idb/get-store-facts-count))]
           (println "Current block number is " current-block-number)
           (println "IndexedDB contains " idb-facts-count "facts")
@@ -151,7 +151,7 @@
           ;; in any case sync the remainning from blockchain
           (println "Let's sync the remainning facts directly from the blockchain. Last block seen " @last-block-so-far)
 
-          (let [past-facts (<? (get-past-events facts-emitter facts-db-address @last-block-so-far))]
+          (let [past-facts (<? (get-past-events web3 facts-db-address @last-block-so-far))]
             (swap! facts-to-transact (fn [fs] (->> (mapv fact->ds-fact past-facts)
                                                    (into fs))))
             (swap! facts-to-store (fn [fs] (into fs past-facts)))))
@@ -173,7 +173,7 @@
         (println "Started in :" (- (.getTime (js/Date.)) stop-watch-start) " millis")
 
         ;; keep listening to new facts and transacting them to datascript db
-        (let [new-facts-ch (install-facts-filter! facts-emitter facts-db-address)]
+        (let [new-facts-ch (install-facts-filter! web3 facts-db-address)]
           (loop [nf (<? new-facts-ch)]
             (d/transact! ds-conn [(fact->ds-fact nf)])
             (recur (<? new-facts-ch)))))

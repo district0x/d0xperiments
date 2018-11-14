@@ -8,9 +8,9 @@
             [clojure.string :as str]
             [goog.string :as gstring]
             [d0xperiments.browser-installer :as installer]
-            [d0xperiments.utils :refer [make-web3js-0-facts-emitter
-                                        make-web3js-1-facts-emitter
-                                        make-ether-js-emitter]])
+            [d0xperiments.web3.impl.ethers-js :refer [make-ethers-js]]
+            [d0xperiments.web3.core :as web3-core]
+            [clojure.spec.test.alpha])
   (:require-macros [d0xperiments.utils :refer [slurpf]]))
 
 ;; TODO Add chema here!!!
@@ -172,25 +172,15 @@
   (re-posh/connect! conn))
 
 (defn ^:export init []
+  (clojure.spec.test.alpha/instrument)
   (let [dc (d/create-conn datascript-schema)
-        ;; For web3js 1.0
-        ;; web3-obj (js/Web3. (or (.-givenProvider js/web3) "ws://localhost:8549/"))
-        ;; facts-emitter (make-web3js-1-facts-emitter web3-obj)
-
-        ;; For web3js 0.20
-        ;; web3-obj (if js/web3
-        ;;            (js/Web3. (.-currentProvider js/web3))
-        ;;            (js/Web3. (new js/Web3.providers.HttpProvider "http://localhost:8549/")))
-        ;; facts-emitter (make-web3js-0-facts-emitter web3-obj)
-
-        ;; For Ether.js
-        web3-obj (new js/ethers.providers.Web3Provider js/web3.currentProvider)
-        facts-emitter (make-ether-js-emitter web3-obj)
-        ]
+        web3 (make-ethers-js (if js/web3
+                               (new js/ethers.providers.Web3Provider js/web3.currentProvider)
+                               (new js/ethers.providers.JsonRpcProvider "http://localhost:8549")))]
     (install-datascript-db! dc)
     (mount-root)
 
-    (installer/install {:facts-emitter facts-emitter
+    (installer/install {:web3 web3
                         :preindexer-url "http://localhost:1234"
                         :facts-db-address #_"0x360b6d00457775267aa3e3ef695583c675318c05" "0x1994a5281cc200e7516e02cac1e707eb6cfa388e"
                         :progress-cb (fn [{:keys [state] :as progress}]

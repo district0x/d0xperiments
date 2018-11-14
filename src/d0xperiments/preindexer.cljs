@@ -9,18 +9,19 @@
             [clojure.tools.cli :refer [parse-opts]]
             [d0xperiments.utils :refer [compress-facts]]
             [clojure.pprint :as pprint]
-            [d0xperiments.utils :refer [make-web3js-1-facts-emitter]])
+            [d0xperiments.web3.impl.ethers-js :refer [make-ethers-js]]
+            [d0xperiments.web3.core :as web3-core])
   (:require-macros [d0xperiments.utils :refer [<?]]))
 
 (nodejs/enable-util-print!)
 
-(defonce w3 (nodejs/require "web3"))
+(defonce ethers (nodejs/require "ethers"))
+
 (defonce http (nodejs/require "http"))
 (defonce zlib (nodejs/require "zlib"))
 (defonce Buffer (.-Buffer (nodejs/require "buffer")))
 (defonce fs (nodejs/require "fs"))
 
-(defonce web3 (atom nil))
 (defonce conn (atom nil))
 
 (defonce last-seen-block (atom 0))
@@ -134,17 +135,17 @@
       (println (:summary result))
       (.exit js/process 1))
 
+    (println "Connecting to " (str "http://" (:rpc options)))
     (let [schema (load-schema (:schema options))
           conn-obj (d/create-conn schema)
-          ws-provider (new (-> w3 .-providers .-WebsocketProvider) (str "ws://" (:rpc options)))
-          http-provider (new (-> w3 .-providers .-HttpProvider) (str "http://" (:rpc options)))
-          web3-http  (new w3 http-provider)
-          web3-ws (new w3 ws-provider)]
 
+          ethers-provider (new (-> ethers .-providers .-JsonRpcProvider)  (str "http://" (:rpc options)))
+          web3 (make-ethers-js ethers-provider)]
+      (set! js/ethers ethers)
       (async/go
         (println "Downloading past events, please wait...")
-        (let [past-events (<? (get-past-events (make-web3js-1-facts-emitter web3-http) (:address options) 0))
-              new-facts-ch (install-facts-filter! (make-web3js-1-facts-emitter web3-ws) (:address options))]
+        (let [past-events (<? (get-past-events web3 (:address options) 0))
+              new-facts-ch (install-facts-filter! web3 (:address options))]
           (println "Past events downloaded, replaying " (count past-events) " facts...")
           ;; transact past facts
           (doseq [f past-events]
@@ -165,49 +166,5 @@
 (set! *main-cli-fn* -main)
 
 (comment
-
-  (-main "0x360b6d00457775267aa3e3ef695583c675318c05"
-         1234
-         "/home/jmonetta/my-projects/district0x/d0xperiments/example-src/d0xperiments/example/db_schema.edn"
-         "ws://localhost:8549/")
-
-  (.listen http-server 1234)
-
-  (create-filters "0xbb123fed696a108f1586c21e67b2ef75f210b329")
-
-  (d/pull-many @conn '[*]
-               (map first
-                    (d/q '[:find ?e :where [?e :person/name]] @conn)))
-
-
-  (do
-    (defonce c (d/create-conn))
-    (d/transact! c [[:db/add 1 :person/name "Rich"]
-                    [:db/add 1 :person/age 45]
-                    [:db/add 2 :person/name "Alex"]
-                    [:db/add 2 :person/age 44]
-                    [:db/add 4 :person/name "Other"]
-                    [:db/add 4 :person/age 100]]))
-  (= (datoms-for @c
-                 [{:type :query
-                   :query '[:find ?eid ?n
-                            :in $ ?age
-                            :where
-                            [?eid :person/name ?n]
-                            [?eid :person/age ?age]]
-                   :vars [45]}
-                  {:type :pull
-                   :pattern '[*]
-                   :ids [4]}
-                  {:type :pull
-                   :pattern '[:db/id :person/name]
-                   :ids [2]}])
-     #{[1 :person/name "Rich"]
-       [1 :person/age 45]
-       [2 :person/name "Alex"]
-       [4 :person/age 100]
-       [4 :person/name "Other"]})
-
-
 
   )
