@@ -1,4 +1,7 @@
-^{:watch-dirs ["test" "src" "example-src"]
+^{:watch-dirs ["example-src"
+               "/home/jmonetta/my-projects/district0x/district0x-facts-db/src/"
+               "/home/jmonetta/my-projects/district0x/cljs-web3-next"
+               "/home/jmonetta/my-projects/district0x/re-frame-web3-fx"]
   :css-dirs ["resources/public/css"]
   :auto-testing true}
 {:main d0xperiments.example.dapp}

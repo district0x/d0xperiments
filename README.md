@@ -66,7 +66,7 @@ contract SomeContract{
 ```bash
 # Build preindexer.js
 
-clj -A:build-preindexer
+clj -m cljs.main -co "{:target :webworker}" -O simple -o target/public/worker.js -c district0x-facts-db.worker
 
 # Run a instance
 

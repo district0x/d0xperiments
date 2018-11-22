@@ -7,13 +7,16 @@
             [posh.reagent :as posh]
             [clojure.string :as str]
             [goog.string :as gstring]
-            [d0xperiments.browser-installer :as installer]
-            [d0xperiments.web3.impl.ethers-js :refer [make-ethers-js]]
-            [d0xperiments.web3.core :as web3-core]
-            [clojure.spec.test.alpha])
-  (:require-macros [d0xperiments.utils :refer [slurpf]]))
+            [district0x-facts-db.browser-installer :as installer]
+            [web3.impl.ethers-js :refer [make-ethers-js]]
+            [web3.core :as web3-core]
+            [cljs.spec.alpha :as s]
+            [cljs.spec.test.alpha]
+            [expound.alpha :as expound])
+  (:require-macros [district0x-facts-db.utils :refer [slurpf]]))
 
-;; TODO Add chema here!!!
+
+(enable-console-print!)
 
 (defonce db-conn (atom nil))
 (def datascript-schema (-> (slurpf "./example-src/d0xperiments/example/db_schema.edn")
@@ -43,21 +46,39 @@
                                               (map first)
                                               (take 20)))})))
 
-
-(defn log-stats [db]
-  (println (str "Memes count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/address]) first first)))
-  (println (str "Challenges count: " (->> @(re-frame/subscribe [::attr-count :reg-entry/challenge]) first first)))
-  (println (str "Votes count: " (->> @(re-frame/subscribe [::attr-count :challenge/vote]) first first)))
-  (println (str "Votes reveals count: " (->> @(re-frame/subscribe [::attr-count :vote/revealed-on]) first first)))
-  (println (str "Votes reclaims count: " (->> @(re-frame/subscribe [::attr-count :vote/reclaimed-reward-on]) first first)))
-  (println (str "Tokens count: " (->> @(re-frame/subscribe [::attr-count :token/id]) first first)))
-  (println (str "Auctions count: " (->> @(re-frame/subscribe [::attr-count :auction/token-id]) first first))))
-
 (re-frame/reg-event-db
  :app-state-change
  (fn [db [_ {:keys [state] :as prog}]]
-   ;;(when (= :ready state) (log-stats db))
    (assoc db :app-state prog)))
+
+;; (re-frame/reg-event-fx
+;;  ::approve-and-create-meme
+;;  (fn [{:keys [db]} [_ data deposit {:keys [Name Hash Size] :as meme-meta}]]
+;;    (let [tx-id (str (random-uuid))
+;;          tx-name "Approve and create meme"
+;;          active-account (account-queries/active-account db)
+;;          extra-data (web3-eth/contract-get-data (contract-queries/instance db :meme-factory)
+;;                                                 :create-meme
+;;                                                 active-account
+;;                                                 Hash
+;;                                                 (bn/number (:issuance data)))]
+;;      {:dispatch [::tx-events/send-tx {:instance (contract-queries/instance db :DANK)
+;;                                       :fn :approve-and-call
+;;                                       :args [(contract-queries/contract-address db :meme-factory)
+;;                                              deposit
+;;                                              extra-data]
+;;                                       :tx-opts {:from active-account
+;;                                                 :gas 6000000}
+;;                                       :tx-id {:meme/create-meme tx-id}
+;;                                       :tx-log {:name tx-name}
+;;                                       :on-tx-success-n [[::logging/info (str tx-name " tx success") ::create-meme]
+;;                                                         [::notification-events/show (gstring/format "Meme created with meta hash %s" Hash)]]
+;;                                       :on-tx-error [::logging/error (str tx-name " tx error") {:user {:id active-account}
+;;                                                                                                :deposit deposit
+;;                                                                                                :data data
+;;                                                                                                :meme-meta meme-meta} ::create-meme]}]})))
+
+
 
 ;;;;;;;;;;;;;;;;;;;
 ;; FXs and COFXs ;;
@@ -166,17 +187,29 @@
 ;; {:state :installing-facts :percentage 50}
 ;; {:state :ready}
 
-
 (defn install-datascript-db! [conn]
   (reset! db-conn conn)
   (re-posh/connect! conn))
 
+(defonce w3 (atom nil))
+
 (defn ^:export init []
-  (clojure.spec.test.alpha/instrument)
+  (cljs.spec.test.alpha/instrument)
+
+  (set! (.-onerror js/window) (fn [& [_ _ _ _ err :as all]]
+                                (let [ed (ex-data err)]
+                                  (if (and (map? ed) (:cljs.spec.alpha/problems ed))
+                                    (do (.error js/console (ex-message err))
+                                        (s/explain-out ed)
+                                        #_(expound/printer ed))
+                                    (.error js/console (.-message err) err)))))
+
   (let [dc (d/create-conn datascript-schema)
-        web3 (make-ethers-js (if js/web3
-                               (new js/ethers.providers.Web3Provider js/web3.currentProvider)
-                               (new js/ethers.providers.JsonRpcProvider "http://localhost:8549")))]
+        provider (if js/web3
+                   (new js/ethers.providers.Web3Provider js/web3.currentProvider)
+                   (new js/ethers.providers.JsonRpcProvider "http://localhost:8549"))
+        web3 (make-ethers-js (.getSigner provider) provider)]
+    (reset! w3 web3)
     (install-datascript-db! dc)
     (mount-root)
 
