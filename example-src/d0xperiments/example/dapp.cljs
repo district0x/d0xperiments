@@ -195,7 +195,7 @@
 
 (defn ^:export init []
   (cljs.spec.test.alpha/instrument)
-
+  (set! cljs.spec.alpha/*fspec-iterations* 0)
   (set! (.-onerror js/window) (fn [& [_ _ _ _ err :as all]]
                                 (let [ed (ex-data err)]
                                   (if (and (map? ed) (:cljs.spec.alpha/problems ed))
